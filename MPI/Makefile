@@ -5,7 +5,7 @@ all : $(PROG)
 CC        =  mpicc
 CFLAGS    =  -g -Wall -O2
 CPPFLAGS  =  -DDEBUG
-LDFLAGS   =  -g -lm
+LDFLAGS   =  -g -lm -O2
 SRC_FOLDER = src
 TARGET_FOLDER = bin
 

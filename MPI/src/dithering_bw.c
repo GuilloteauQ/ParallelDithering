@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include "Util.h"
 
+#define NB_BUFFERS 3
+
 typedef struct image_t {
     size_t cols;
     size_t rows;
@@ -78,10 +80,12 @@ void floyd_steinberg_mpi(int16_t* local_data,
 
     /* ----- Local Dithering ----- */
     int16_t* error_from_top = calloc(block_size, sizeof(int16_t));
-    int16_t* error_to_bot = calloc(block_size * 3, sizeof(int16_t));
+    size_t buf_size = NB_BUFFERS * block_size;
+    int16_t* error_to_bot = calloc(buf_size, sizeof(int16_t));
+    size_t blocks_per_line = cols / block_size;
 
     for (size_t line = 0; line < lines_per_process; line++) {
-        for (size_t block_index = 0; block_index < cols / block_size;
+        for (size_t block_index = 0; block_index < blocks_per_line;
              block_index++) {
             size_t offset = line * cols + block_index * block_size;
             if (!(my_rank == 0 && line == 0)) {
@@ -103,11 +107,10 @@ void floyd_steinberg_mpi(int16_t* local_data,
                 int16_t new_value = (current_value < 127) ? 0 : 255;
                 local_data[offset + i] = new_value;
                 int16_t error = current_value - new_value;
-                // circular buffer index and size
-                size_t base_index = (3 + (block_index % 3)) * block_size + i;
-                size_t buf_size = 3 * block_size;
+                // circular buffer index
+                size_t base_index = (block_index % NB_BUFFERS) * block_size + i;
 
-                if (!(block_index == cols / block_size &&
+                if (!(block_index == blocks_per_line - 1 &&
                       i == block_size - 1)) {
                     local_data[offset + i + 1] =
                         error * 7 / 16 + local_data[offset + i + 1];
@@ -121,28 +124,32 @@ void floyd_steinberg_mpi(int16_t* local_data,
             if (block_index != 0 &&
                 !(line == lines_per_process - 1 && my_rank == world_size - 1)) {
                 MPI_Request req;
-                MPI_Isend(error_to_bot +
-                              (((block_index % 3) - 1 + 3) % 3) * block_size,
+                size_t index_block_to_send =
+                    ((block_index % NB_BUFFERS) + NB_BUFFERS - 1) % NB_BUFFERS;
+
+                MPI_Isend(error_to_bot + index_block_to_send * block_size,
                           block_size, MPI_INT16_T, (my_rank + 1) % world_size,
                           0, MPI_COMM_WORLD, &req);
                 MPI_Request_free(&req);
                 // reinit values
                 for (size_t i = 0; i < block_size; i++) {
-                    (error_to_bot +
-                     (((block_index % 3) - 1 + 3) % 3) * block_size)[i] = 0;
+                    (error_to_bot + index_block_to_send * block_size)[i] = 0;
                 }
             }
         }
         if (!(line == lines_per_process - 1 && my_rank == world_size - 1)) {
             MPI_Request req;
-            MPI_Isend(error_to_bot + ((cols / block_size - 1) % 3) * block_size,
+            MPI_Isend(error_to_bot +
+                          ((blocks_per_line - 1) % NB_BUFFERS) * block_size,
                       block_size, MPI_INT16_T, (my_rank + 1) % world_size, 0,
                       MPI_COMM_WORLD, &req);
             MPI_Request_free(&req);
         }
         // reinit values
-        for (size_t i = 0; i < block_size; i++) {
-            (error_to_bot + ((cols / block_size - 1) % 3) * block_size)[i] = 0;
+        // for (size_t i = 0; i < block_size; i++) {
+        for (size_t i = 0; i < buf_size; i++) {
+            // (error_to_bot + ((blocks_per_line - 1) % 3) * block_size)[i] = 0;
+            error_to_bot[i] = 0;
         }
     }
     free(error_to_bot);
@@ -180,7 +187,6 @@ void floyd_steinberg(Image* image) {
 
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
-
 
     char* filename = argv[1];
     size_t h = atoi(argv[2]);
@@ -241,7 +247,7 @@ int main(int argc, char** argv) {
         write_image_to_file(ppm_image, out_filename);
         free(ppm_image->pixels);
         free(ppm_image);
-	printf("Execution Time: %f s\n", end_time - start_time);
+        printf("Execution Time: %f s\n", end_time - start_time);
     }
     free(local_data);
     MPI_Finalize();
