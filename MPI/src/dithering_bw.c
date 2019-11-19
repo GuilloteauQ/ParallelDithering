@@ -91,7 +91,7 @@ void floyd_steinberg_mpi(int16_t* local_data,
                          size_t block_size,
                          size_t cols,
                          size_t lines_per_process) {
-    assert(cols % block_size == 0);
+    // assert(cols % block_size == 0);
     int world_size = get_world_size();
     int my_rank = get_my_rank();
 
@@ -102,9 +102,11 @@ void floyd_steinberg_mpi(int16_t* local_data,
     size_t blocks_per_line = cols / block_size;
 
     for (size_t line = 0; line < lines_per_process; line++) {
+        size_t line_offset = line * cols;
         for (size_t block_index = 0; block_index < blocks_per_line;
              block_index++) {
-            size_t offset = line * cols + block_index * block_size;
+            size_t elem_offset = block_index * block_size;
+            size_t offset = line_offset + elem_offset;
             if (!(my_rank == 0 && line == 0)) {
                 /* ----- If this is not the top of the image, we receive the
                  * error from the above process */
@@ -113,13 +115,13 @@ void floyd_steinberg_mpi(int16_t* local_data,
                          MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             }
             /* ----- We add the error to the local data ----- */
-            for (size_t i = 0; i < block_size; i++) {
+            for (size_t i = 0; i < block_size && elem_offset + i < cols; i++) {
                 local_data[offset + i] += error_from_top[i];
                 // Should be useless ...
                 // error_from_top[i] = 0;
             }
             /* ----- Compute the local error ----- */
-            for (size_t i = 0; i < block_size; i++) {
+            for (size_t i = 0; i < block_size && elem_offset + i < cols; i++) {
                 int16_t current_value = local_data[offset + i];
                 int16_t new_value = (current_value < 127) ? 0 : 255;
                 local_data[offset + i] = new_value;
@@ -204,9 +206,6 @@ void floyd_steinberg(Image* image) {
 
 size_t find_block_size(size_t w, size_t p) {
     size_t x = w / (2 * p);
-    while (w % x != 0) {
-        x++;
-    }
     printf("Block size: %ld\n", x);
     return x;
 }
@@ -215,7 +214,7 @@ int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
     char* filename = argv[1];
-    char* out_filename = (argc == 2) ? argv[3] : "out_mpi.pgm";
+    char* out_filename = (argc == 3) ? argv[2] : "out_mpi.pgm";
 
     Image* ppm_image;
     size_t h;
