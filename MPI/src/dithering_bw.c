@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <limits.h>
 #include <mpi.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -6,6 +7,22 @@
 #include "Util.h"
 
 #define NB_BUFFERS 3
+
+// taken from :
+// https://stackoverflow.com/questions/40807833/sending-size-t-type-data-with-mpi
+#if SIZE_MAX == UCHAR_MAX
+#define my_MPI_SIZE_T MPI_UNSIGNED_CHAR
+#elif SIZE_MAX == USHRT_MAX
+#define my_MPI_SIZE_T MPI_UNSIGNED_SHORT
+#elif SIZE_MAX == UINT_MAX
+#define my_MPI_SIZE_T MPI_UNSIGNED
+#elif SIZE_MAX == ULONG_MAX
+#define my_MPI_SIZE_T MPI_UNSIGNED_LONG
+#elif SIZE_MAX == ULLONG_MAX
+#define my_MPI_SIZE_T MPI_UNSIGNED_LONG_LONG
+#else
+#error "what is happening here?"
+#endif
 
 typedef struct image_t {
     size_t cols;
@@ -185,20 +202,41 @@ void floyd_steinberg(Image* image) {
     }
 }
 
+size_t find_block_size(size_t w, size_t p) {
+    size_t x = w / (2 * p);
+    while (w % x != 0) {
+        x++;
+    }
+    printf("Block size: %ld\n", x);
+    return x;
+}
+
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
     char* filename = argv[1];
-    size_t h = atoi(argv[2]);
-    size_t w = atoi(argv[3]);
-    size_t block_size = atoi(argv[4]);
-    char* out_filename = (argc == 6) ? argv[5] : "out_mpi.pgm";
+    char* out_filename = (argc == 2) ? argv[3] : "out_mpi.pgm";
 
     Image* ppm_image;
+    size_t h;
+    size_t w;
+    size_t block_size;
     int world_size = get_world_size();
     int my_rank = get_my_rank();
+    int root = world_size - 1;
     int16_t* pixels = NULL;
     MPI_Datatype PixelLine;
+
+    if (my_rank == root) {
+        ppm_image = read_image_from_file(filename);
+        pixels = ppm_image->pixels;
+        h = ppm_image->rows;
+        w = ppm_image->cols;
+        block_size = find_block_size(w, (size_t)world_size);
+    }
+    MPI_Bcast(&h, 1, my_MPI_SIZE_T, root, MPI_COMM_WORLD);
+    MPI_Bcast(&w, 1, my_MPI_SIZE_T, root, MPI_COMM_WORLD);
+    MPI_Bcast(&block_size, 1, my_MPI_SIZE_T, root, MPI_COMM_WORLD);
 
     /* ----- Computing the number of cells to send ----- */
     size_t lines_to_send_per_process = h / world_size;
@@ -208,31 +246,27 @@ int main(int argc, char** argv) {
                     &PixelLine);
     MPI_Type_commit(&PixelLine);
 
-    if (my_rank == 0) {
-        ppm_image = read_image_from_file(filename);
-        pixels = ppm_image->pixels;
-    }
     double start_time, end_time;
     MPI_Barrier(MPI_COMM_WORLD);
     start_time = MPI_Wtime();
 
     /* ----- Sending the data ----- */
-    if (my_rank == 0) {
+    if (my_rank == root) {
         MPI_Request req;
         for (size_t i = 0; i < world_size; i++) {
             MPI_Isend(pixels + i * w, 1, PixelLine, i, 0, MPI_COMM_WORLD, &req);
         }
     }
-    MPI_Recv(local_data, cells_to_send_per_process, MPI_INT16_T, 0, 0,
+    MPI_Recv(local_data, cells_to_send_per_process, MPI_INT16_T, root, 0,
              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
     floyd_steinberg_mpi(local_data, block_size, w, lines_to_send_per_process);
 
     MPI_Request req;
-    MPI_Isend(local_data, cells_to_send_per_process, MPI_INT16_T, 0, 0,
+    MPI_Isend(local_data, cells_to_send_per_process, MPI_INT16_T, root, 0,
               MPI_COMM_WORLD, &req);
 
-    if (my_rank == 0) {
+    if (my_rank == root) {
         for (size_t i = 0; i < world_size; i++) {
             MPI_Recv(pixels + i * w, 1, PixelLine, i, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
@@ -243,7 +277,7 @@ int main(int argc, char** argv) {
     MPI_Barrier(MPI_COMM_WORLD);
     end_time = MPI_Wtime();
 
-    if (my_rank == 0) {
+    if (my_rank == root) {
         write_image_to_file(ppm_image, out_filename);
         free(ppm_image->pixels);
         free(ppm_image);
