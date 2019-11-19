@@ -278,9 +278,23 @@ int main(int argc, char** argv) {
 
     if (my_rank == root) {
         write_image_to_file(ppm_image, out_filename);
+
+        double seq_start_time, seq_end_time;
+        ppm_image = read_image_from_file(filename);
+        seq_start_time = MPI_Wtime();
+        floyd_steinberg(ppm_image);
+        seq_end_time = MPI_Wtime();
+
         free(ppm_image->pixels);
         free(ppm_image);
-        printf("Execution Time: %f s\n", end_time - start_time);
+        double par_time = end_time - start_time;
+        double seq_time = seq_end_time - seq_start_time;
+        double speedup = seq_time / par_time;
+        double efficiency = speedup / (double)world_size;
+        printf(
+            "Execution Time:\n\tPar %f s\n\tSeq %f s\n\tSpeedup "
+            "%f\n\tEfficiency %f\n",
+            par_time, seq_time, speedup, efficiency);
     }
     free(local_data);
     MPI_Finalize();
