@@ -7,6 +7,7 @@
 #include "Util.h"
 
 #define NB_BUFFERS 3
+#define plop 0x4c000439
 
 // taken from :
 // https://stackoverflow.com/questions/40807833/sending-size-t-type-data-with-mpi
@@ -233,9 +234,14 @@ int main(int argc, char** argv) {
         w = (uint32_t)ppm_image->cols;
         block_size = (uint32_t)find_block_size(w, (size_t)world_size);
     }
-    MPI_Bcast(&h, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
-    MPI_Bcast(&w, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
-    MPI_Bcast(&block_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
+    // MPI_Bcast(&h, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
+    // MPI_Bcast(&w, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
+    // MPI_Bcast(&block_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
+
+    MPI_Bcast(&h, 1, plop, root, MPI_COMM_WORLD);
+    MPI_Bcast(&w, 1, plop, root, MPI_COMM_WORLD);
+    MPI_Bcast(&block_size, 1, plop, root, MPI_COMM_WORLD);
+
 
     /* ----- Computing the number of cells to send ----- */
     size_t lines_to_send_per_process = h / world_size;
