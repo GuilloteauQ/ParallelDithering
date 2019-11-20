@@ -217,9 +217,9 @@ int main(int argc, char** argv) {
     char* out_filename = (argc == 3) ? argv[2] : "out_mpi.pgm";
 
     Image* ppm_image;
-    size_t h;
-    size_t w;
-    size_t block_size;
+    uint32_t h;
+    uint32_t w;
+    uint32_t block_size;
     int world_size = get_world_size();
     int my_rank = get_my_rank();
     int root = world_size - 1;
@@ -229,13 +229,13 @@ int main(int argc, char** argv) {
     if (my_rank == root) {
         ppm_image = read_image_from_file(filename);
         pixels = ppm_image->pixels;
-        h = ppm_image->rows;
-        w = ppm_image->cols;
-        block_size = find_block_size(w, (size_t)world_size);
+        h = (uint32_t)ppm_image->rows;
+        w = (uint32_t)ppm_image->cols;
+        block_size = (uint32_t)find_block_size(w, (size_t)world_size);
     }
-    MPI_Bcast(&h, 1, my_MPI_SIZE_T, root, MPI_COMM_WORLD);
-    MPI_Bcast(&w, 1, my_MPI_SIZE_T, root, MPI_COMM_WORLD);
-    MPI_Bcast(&block_size, 1, my_MPI_SIZE_T, root, MPI_COMM_WORLD);
+    MPI_Bcast(&h, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
+    MPI_Bcast(&w, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
+    MPI_Bcast(&block_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
 
     /* ----- Computing the number of cells to send ----- */
     size_t lines_to_send_per_process = h / world_size;
