@@ -8,22 +8,6 @@
 
 #define NB_BUFFERS 3
 
-// taken from :
-// https://stackoverflow.com/questions/40807833/sending-size-t-type-data-with-mpi
-#if SIZE_MAX == UCHAR_MAX
-#define my_MPI_SIZE_T MPI_UNSIGNED_CHAR
-#elif SIZE_MAX == USHRT_MAX
-#define my_MPI_SIZE_T MPI_UNSIGNED_SHORT
-#elif SIZE_MAX == UINT_MAX
-#define my_MPI_SIZE_T MPI_UNSIGNED
-#elif SIZE_MAX == ULONG_MAX
-#define my_MPI_SIZE_T MPI_UNSIGNED_LONG
-#elif SIZE_MAX == ULLONG_MAX
-#define my_MPI_SIZE_T MPI_UNSIGNED_LONG_LONG
-#else
-#error "what is happening here?"
-#endif
-
 typedef struct image_t {
     size_t cols;
     size_t rows;
@@ -117,8 +101,6 @@ void floyd_steinberg_mpi(int16_t* local_data,
             /* ----- We add the error to the local data ----- */
             for (size_t i = 0; i < block_size && elem_offset + i < cols; i++) {
                 local_data[offset + i] += error_from_top[i];
-                // Should be useless ...
-                // error_from_top[i] = 0;
             }
             /* ----- Compute the local error ----- */
             for (size_t i = 0; i < block_size && elem_offset + i < cols; i++) {
@@ -165,10 +147,10 @@ void floyd_steinberg_mpi(int16_t* local_data,
             MPI_Request_free(&req);
         }
         // reinit values
-        // for (size_t i = 0; i < block_size; i++) {
-        for (size_t i = 0; i < buf_size; i++) {
-            // (error_to_bot + ((blocks_per_line - 1) % 3) * block_size)[i] = 0;
-            error_to_bot[i] = 0;
+        for (size_t i = 0; i < block_size; i++) {
+            // for (size_t i = 0; i < buf_size; i++) {
+            (error_to_bot + ((blocks_per_line - 1) % 3) * block_size)[i] = 0;
+            // error_to_bot[i] = 0;
         }
     }
     free(error_to_bot);
@@ -206,7 +188,7 @@ void floyd_steinberg(Image* image) {
 
 size_t find_block_size(size_t w, size_t p) {
     size_t x = w / (2 * p);
-    printf("Block size: %ld\n", x);
+    // printf("Block size: %ld\n", x);
     return x;
 }
 
@@ -289,12 +271,15 @@ int main(int argc, char** argv) {
         free(ppm_image);
         double par_time = end_time - start_time;
         double seq_time = seq_end_time - seq_start_time;
-        double speedup = seq_time / par_time;
-        double efficiency = speedup / (double)world_size;
-        printf(
-            "Execution Time:\n\tPar %f s\n\tSeq %f s\n\tSpeedup "
-            "%f\n\tEfficiency %f\n",
-            par_time, seq_time, speedup, efficiency);
+        // double speedup = seq_time / par_time;
+        // double efficiency = speedup / (double)world_size
+        // H W P block_size par seq
+        printf("%d %d %d %d %f %f\n", h, w, world_size, block_size, par_time,
+               seq_time);
+        // printf(
+        //     "Execution Time:\n\tPar %f s\n\tSeq %f s\n\tSpeedup "
+        //     "%f\n\tEfficiency %f\n",
+        //     par_time, seq_time, speedup, efficiency);
     }
     free(local_data);
     MPI_Finalize();
