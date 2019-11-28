@@ -215,6 +215,12 @@ int main(int argc, char** argv) {
         w = (uint32_t)ppm_image->cols;
         block_size = (uint32_t)find_block_size(w, (size_t)world_size);
     }
+
+    double start_time, end_time;
+    MPI_Barrier(MPI_COMM_WORLD);
+    start_time = MPI_Wtime();
+
+
     MPI_Bcast(&h, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
     MPI_Bcast(&w, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
     MPI_Bcast(&block_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
@@ -226,11 +232,6 @@ int main(int argc, char** argv) {
     MPI_Type_vector(lines_to_send_per_process, w, world_size * w, MPI_INT16_T,
                     &PixelLine);
     MPI_Type_commit(&PixelLine);
-
-    double start_time, end_time;
-    MPI_Barrier(MPI_COMM_WORLD);
-    start_time = MPI_Wtime();
-
     /* ----- Sending the data ----- */
     if (my_rank == root) {
         MPI_Request req;
