@@ -71,11 +71,39 @@ int get_world_size() {
     return size;
 }
 
+void partial_floyd_steinberg(size_t offset,
+                             size_t elem_offset,
+                             size_t cols,
+                             size_t block_index,
+                             size_t block_size,
+                             size_t blocks_per_line,
+                             int16_t* local_data,
+                             int16_t* error_to_bot) {
+    size_t buf_size = block_size * NB_BUFFERS;
+    for (size_t i = 0; i < block_size && elem_offset + i < cols; i++) {
+        int16_t current_value = local_data[offset + i];
+        int16_t new_value = (current_value < 127) ? 0 : 255;
+        local_data[offset + i] = new_value;
+        int16_t error = current_value - new_value;
+        // circular buffer index
+        size_t base_index = (block_index % NB_BUFFERS) * block_size + i;
+
+        if (!(block_index == blocks_per_line - 1 && i == block_size - 1)) {
+            local_data[offset + i + 1] =
+                error * 7 / 16 + local_data[offset + i + 1];
+
+            error_to_bot[(base_index + 1) % buf_size] += error * 1 / 16;
+        }
+        error_to_bot[base_index % buf_size] += error * 5 / 16;
+        error_to_bot[(base_index - 1) % buf_size] += error * 3 / 16;
+    }
+}
+
 void floyd_steinberg_mpi(int16_t* local_data,
                          size_t block_size,
                          size_t cols,
-                         size_t lines_per_process) {
-    // assert(cols % block_size == 0);
+                         size_t lines_per_process,
+                         size_t block_line) {
     int world_size = get_world_size();
     int my_rank = get_my_rank();
 
@@ -91,6 +119,7 @@ void floyd_steinberg_mpi(int16_t* local_data,
              block_index++) {
             size_t elem_offset = block_index * block_size;
             size_t offset = line_offset + elem_offset;
+
             if (!(my_rank == 0 && line == 0)) {
                 /* ----- If this is not the top of the image, we receive the
                  * error from the above process */
@@ -103,24 +132,9 @@ void floyd_steinberg_mpi(int16_t* local_data,
                 local_data[offset + i] += error_from_top[i];
             }
             /* ----- Compute the local error ----- */
-            for (size_t i = 0; i < block_size && elem_offset + i < cols; i++) {
-                int16_t current_value = local_data[offset + i];
-                int16_t new_value = (current_value < 127) ? 0 : 255;
-                local_data[offset + i] = new_value;
-                int16_t error = current_value - new_value;
-                // circular buffer index
-                size_t base_index = (block_index % NB_BUFFERS) * block_size + i;
-
-                if (!(block_index == blocks_per_line - 1 &&
-                      i == block_size - 1)) {
-                    local_data[offset + i + 1] =
-                        error * 7 / 16 + local_data[offset + i + 1];
-
-                    error_to_bot[(base_index + 1) % buf_size] += error * 1 / 16;
-                }
-                error_to_bot[base_index % buf_size] += error * 5 / 16;
-                error_to_bot[(base_index - 1) % buf_size] += error * 3 / 16;
-            }
+            partial_floyd_steinberg(offset, elem_offset, cols, block_index,
+                                    block_size, blocks_per_line, local_data,
+                                    error_to_bot);
             /* ----- We can send the previous errors ----- */
             if (block_index != 0 &&
                 !(line == lines_per_process - 1 && my_rank == world_size - 1)) {
@@ -220,7 +234,6 @@ int main(int argc, char** argv) {
     MPI_Barrier(MPI_COMM_WORLD);
     start_time = MPI_Wtime();
 
-
     MPI_Bcast(&h, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
     MPI_Bcast(&w, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
     MPI_Bcast(&block_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
@@ -242,7 +255,8 @@ int main(int argc, char** argv) {
     MPI_Recv(local_data, cells_to_send_per_process, MPI_INT16_T, root, 0,
              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    floyd_steinberg_mpi(local_data, block_size, w, lines_to_send_per_process);
+    floyd_steinberg_mpi(local_data, block_size, w, lines_to_send_per_process,
+                        2);
 
     MPI_Request req;
     MPI_Isend(local_data, cells_to_send_per_process, MPI_INT16_T, root, 0,
