@@ -394,7 +394,7 @@ int main(int argc, char** argv) {
 
     /* ----- Computing the number of cells to send ----- */
     size_t lines_to_send_per_process = h / (world_size * line_block_size);
-    size_t cells_to_send_per_process = lines_to_send_per_process * w;
+    size_t cells_to_send_per_process = lines_to_send_per_process * w * line_block_size;
     int16_t* local_data = malloc(cells_to_send_per_process * sizeof(int16_t));
     MPI_Type_vector(lines_to_send_per_process, w * line_block_size,
                     world_size * w * line_block_size, MPI_INT16_T, &PixelLine);
@@ -424,7 +424,7 @@ int main(int argc, char** argv) {
 
     if (my_rank == root) {
         for (size_t i = 0; i < world_size; i++) {
-            MPI_Recv(pixels + i * w, 1, PixelLine, i, 0, MPI_COMM_WORLD,
+            MPI_Recv(pixels + i * w * line_block_size, 1, PixelLine, i, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
         }
     }
