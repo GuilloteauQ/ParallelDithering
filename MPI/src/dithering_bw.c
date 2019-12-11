@@ -71,10 +71,37 @@ int get_world_size() {
     return size;
 }
 
+void sequential_floyd_steinberg(int16_t data, size_t rows, size_t cols) {
+    for (size_t y = 0; y < rows; y++) {
+        for (size_t x = 0; x < cols; x++) {
+            int16_t current_value = data[y * cols + x];
+            int16_t new_value = (current_value < 127) ? 0 : 255;
+            data[y * cols + x] = new_value;
+            int16_t error = current_value - new_value;
+
+            if (x < cols - 1) {
+                data[(y + 0) * cols + (x + 1)] =
+                    error * 7 / 16 + data[(y + 0) * cols + (x + 1)];
+            }
+            if (y < rows - 1) {
+                if (x > 0) {
+                    data[(y + 1) * cols + (x - 1)] =
+                        error * 3 / 16 + data[(y + 1) * cols + (x - 1)];
+                }
+                data[(y + 1) * cols + (x + 0)] =
+                    error * 5 / 16 + data[(y + 1) * cols + (x + 0)];
+                data[(y + 1) * cols + (x + 1)] =
+                    error * 1 / 16 + data[(y + 1) * cols + (x + 1)];
+            }
+        }
+    }
+}
+
 void floyd_steinberg_mpi(int16_t* local_data,
                          size_t block_size,
                          size_t cols,
-                         size_t lines_per_process) {
+                         size_t lines_per_process,
+                         size_t line_block) {
     // assert(cols % block_size == 0);
     int world_size = get_world_size();
     int my_rank = get_my_rank();
@@ -160,30 +187,7 @@ void floyd_steinberg_mpi(int16_t* local_data,
 void floyd_steinberg(Image* image) {
     size_t rows = image->rows;
     size_t cols = image->cols;
-    for (size_t y = 0; y < rows; y++) {
-        for (size_t x = 0; x < cols; x++) {
-            int16_t current_value = image->pixels[y * cols + x];
-            int16_t new_value = (current_value < 127) ? 0 : 255;
-            image->pixels[y * cols + x] = new_value;
-            int16_t error = current_value - new_value;
-
-            if (x < cols - 1) {
-                image->pixels[(y + 0) * cols + (x + 1)] =
-                    error * 7 / 16 + image->pixels[(y + 0) * cols + (x + 1)];
-            }
-            if (y < rows - 1) {
-                if (x > 0) {
-                    image->pixels[(y + 1) * cols + (x - 1)] =
-                        error * 3 / 16 +
-                        image->pixels[(y + 1) * cols + (x - 1)];
-                }
-                image->pixels[(y + 1) * cols + (x + 0)] =
-                    error * 5 / 16 + image->pixels[(y + 1) * cols + (x + 0)];
-                image->pixels[(y + 1) * cols + (x + 1)] =
-                    error * 1 / 16 + image->pixels[(y + 1) * cols + (x + 1)];
-            }
-        }
-    }
+    sequential_floyd_steinberg(image->pixels, rows, cols);
 }
 
 size_t find_block_size(size_t w, size_t p) {
@@ -220,7 +224,6 @@ int main(int argc, char** argv) {
     MPI_Barrier(MPI_COMM_WORLD);
     start_time = MPI_Wtime();
 
-
     MPI_Bcast(&h, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
     MPI_Bcast(&w, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
     MPI_Bcast(&block_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
@@ -242,7 +245,8 @@ int main(int argc, char** argv) {
     MPI_Recv(local_data, cells_to_send_per_process, MPI_INT16_T, root, 0,
              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    floyd_steinberg_mpi(local_data, block_size, w, lines_to_send_per_process);
+    floyd_steinberg_mpi(local_data, block_size, w, lines_to_send_per_process,
+                        2);
 
     MPI_Request req;
     MPI_Isend(local_data, cells_to_send_per_process, MPI_INT16_T, root, 0,
