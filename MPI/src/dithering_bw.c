@@ -254,7 +254,7 @@ void fs_mpi(int16_t* local_data,
         if (line_block_size <= 2) {
             if (!(block_of_lines == line_block_size - 1 &&
                   my_rank == world_size - 1)) {
-                send_below(blocks_per_line - 1, block_size, my_rank, world_size,
+                send_below(block_of_lines - 1, block_size, my_rank, world_size,
                            error_to_bot);
             }
         }
@@ -373,7 +373,7 @@ int main(int argc, char** argv) {
     int my_rank = get_my_rank();
     int root = world_size - 1;
     int16_t* pixels = NULL;
-    size_t line_block_size = world_size;
+    size_t line_block_size = 1;
     MPI_Datatype PixelLine;
 
     if (my_rank == root) {
