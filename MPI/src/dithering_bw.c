@@ -105,11 +105,14 @@ int16_t update_and_compute_error(int16_t* data, size_t i) {
     return current_value - new_value;
 }
 
-void sequential_floyd_steinberg(int16_t* data, size_t rows, size_t cols) {
+void sequential_floyd_steinberg(int16_t* data,
+                                size_t rows,
+                                size_t cols,
+                                size_t offset_rows) {
     for (size_t y = 0; y < rows; y++) {
         for (size_t x = 0; x < cols; x++) {
             int16_t error = update_and_compute_error(data, y * cols + x);
-            propagate_error_local(data, rows, cols, error, x, y);
+            propagate_error_local(data, rows + offset_rows, cols, error, x, y);
         }
     }
 }
@@ -179,33 +182,32 @@ void fs_mpi(int16_t* local_data,
         // printf("[%d] block_of_lines = %d\n", my_rank, block_of_lines);
         /* ----- First Line ----- */
         {
-            for (size_t block_index = 0; block_index < cols / block_size;
+            for (size_t block_index = 0; block_index < blocks_per_line;
                  block_index++) {
-                size_t elem_offset = block_index * block_size;
-                size_t offset = line * cols + elem_offset;
+                size_t block_offset = block_index * block_size;
+                size_t offset = line * cols + block_offset;
                 if (!(my_rank == 0 && line == 0)) {
                     /* ----- If this is not the top of the image, we receive the
                      * error from the above process */
                     MPI_Recv(error_from_top, block_size, MPI_INT16_T,
                              (my_rank + world_size - 1) % world_size, 0,
                              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                }
-                /* ----- We add the error to the local data ----- */
-                for (size_t i = 0; i < block_size && elem_offset + i < cols;
-                     i++) {
-                    local_data[offset + i] += error_from_top[i];
+                    /* ----- We add the error to the local data ----- */
+                    for (size_t i = 0;
+                         i < block_size && block_offset + i < cols; i++) {
+                        local_data[offset + i] += error_from_top[i];
+                    }
                 }
                 /* ----- Compute the local error ----- */
-                for (size_t i = 0; i < block_size && elem_offset + i < cols;
+                for (size_t i = 0; i < block_size && block_offset + i < cols;
                      i++) {
                     int16_t error =
                         update_and_compute_error(local_data, i + offset);
 
                     if (line_block_size > 1) {
-                        propagate_error_local(local_data + line * cols,
-                                              line_block_size, cols, error,
-                                              i + block_index * block_size, 0);
-                        // block_of_lines * line_block_size * cols);
+                        propagate_error_local(
+                            local_data, lines_per_process, cols, error,
+                            i + block_size * block_index, line);
                     } else {
                         propagate_error_for_sending(
                             local_data, block_index, block_size,
@@ -226,17 +228,18 @@ void fs_mpi(int16_t* local_data,
         if (line_block_size > 2) {
             /* We skip the first and last line of the block as they require some
              * communications */
-            sequential_floyd_steinberg(local_data + (line + 1) * cols,
-                                       line_block_size - 2, cols);
+            sequential_floyd_steinberg(
+                local_data + (line + 1) * cols * sizeof(int16_t),
+                line_block_size - 2, cols, 1);
         } else if (line_block_size == 2) {
             /* We just have to dither and send the data */
             size_t line_bot = line + line_block_size - 1;
             for (size_t block_index = 0; block_index < cols / block_size;
                  block_index++) {
-                size_t elem_offset = block_index * block_size;
-                size_t offset = line_bot * cols + elem_offset;
+                size_t block_offset = block_index * block_size;
+                size_t offset = line_bot * cols + block_offset;
                 /* ----- Compute the local error ----- */
-                for (size_t i = 0; i < block_size && elem_offset + i < cols;
+                for (size_t i = 0; i < block_size && block_offset + i < cols;
                      i++) {
                     int16_t error =
                         update_and_compute_error(local_data, i + offset);
@@ -283,8 +286,8 @@ void floyd_steinberg_mpi(int16_t* local_data,
         size_t line_offset = line * cols;
         for (size_t block_index = 0; block_index < blocks_per_line;
              block_index++) {
-            size_t elem_offset = block_index * block_size;
-            size_t offset = line_offset + elem_offset;
+            size_t block_offset = block_index * block_size;
+            size_t offset = line_offset + block_offset;
             if (!(my_rank == 0 && line == 0)) {
                 /* ----- If this is not the top of the image, we receive the
                  * error from the above process */
@@ -293,11 +296,11 @@ void floyd_steinberg_mpi(int16_t* local_data,
                          MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             }
             /* ----- We add the error to the local data ----- */
-            for (size_t i = 0; i < block_size && elem_offset + i < cols; i++) {
+            for (size_t i = 0; i < block_size && block_offset + i < cols; i++) {
                 local_data[offset + i] += error_from_top[i];
             }
             /* ----- Compute the local error ----- */
-            for (size_t i = 0; i < block_size && elem_offset + i < cols; i++) {
+            for (size_t i = 0; i < block_size && block_offset + i < cols; i++) {
                 int16_t current_value = local_data[offset + i];
                 int16_t new_value = (current_value < 127) ? 0 : 255;
                 local_data[offset + i] = new_value;
@@ -354,7 +357,7 @@ void floyd_steinberg_mpi(int16_t* local_data,
 void floyd_steinberg(Image* image) {
     size_t rows = image->rows;
     size_t cols = image->cols;
-    sequential_floyd_steinberg(image->pixels, rows, cols);
+    sequential_floyd_steinberg(image->pixels, rows, cols, 0);
 }
 
 size_t find_block_size(size_t w, size_t p) {
@@ -397,12 +400,13 @@ int main(int argc, char** argv) {
     MPI_Bcast(&block_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
 
     /* ----- Computing the number of cells to send ----- */
-    size_t lines_to_send_per_process = h / (world_size * line_block_size);
-    size_t cells_to_send_per_process =
-        lines_to_send_per_process * w * line_block_size;
+    size_t lines_to_send_per_process = h / world_size;
+    size_t cells_to_send_per_process = lines_to_send_per_process * w;
     int16_t* local_data = malloc(cells_to_send_per_process * sizeof(int16_t));
-    MPI_Type_vector(lines_to_send_per_process, w * line_block_size,
-                    world_size * w * line_block_size, MPI_INT16_T, &PixelLine);
+
+    MPI_Type_vector(lines_to_send_per_process / line_block_size,
+                    w * line_block_size, world_size * w * line_block_size,
+                    MPI_INT16_T, &PixelLine);
     MPI_Type_commit(&PixelLine);
     printf("world_size %d, line_block_size %d\n", world_size, line_block_size);
     /* ----- Sending the data ----- */
@@ -418,10 +422,8 @@ int main(int argc, char** argv) {
 
     // floyd_steinberg_mpi(local_data, block_size, w,
     // lines_to_send_per_process);
-    printf("OK1\n");
     fs_mpi(local_data, block_size, w, lines_to_send_per_process,
            line_block_size);
-    printf("OK2\n");
 
     MPI_Request req;
     MPI_Isend(local_data, cells_to_send_per_process, MPI_INT16_T, root, 0,
@@ -446,6 +448,8 @@ int main(int argc, char** argv) {
         seq_start_time = MPI_Wtime();
         floyd_steinberg(ppm_image);
         seq_end_time = MPI_Wtime();
+
+        write_image_to_file(ppm_image, "seq.pgm");
 
         free(ppm_image->pixels);
         free(ppm_image);
