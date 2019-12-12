@@ -8,6 +8,11 @@
 
 #define NB_BUFFERS 3
 
+#define RIGHT 7 / 16
+#define BOT_LEFT 3 / 16
+#define BOT 5 / 16
+#define BOT_RIGHT 1 / 16
+
 typedef struct image_t {
     size_t cols;
     size_t rows;
@@ -79,17 +84,17 @@ void propagate_error_local(int16_t* data,
                            size_t y) {
     if (x < cols - 1) {
         data[(y + 0) * cols + (x + 1)] =
-            error * 7 / 16 + data[(y + 0) * cols + (x + 1)];
+            error * RIGHT + data[(y + 0) * cols + (x + 1)];
     }
     if (y < rows - 1) {
         if (x > 0) {
             data[(y + 1) * cols + (x - 1)] =
-                error * 3 / 16 + data[(y + 1) * cols + (x - 1)];
+                error * BOT_LEFT + data[(y + 1) * cols + (x - 1)];
         }
         data[(y + 1) * cols + (x + 0)] =
-            error * 5 / 16 + data[(y + 1) * cols + (x + 0)];
+            error * BOT + data[(y + 1) * cols + (x + 0)];
         data[(y + 1) * cols + (x + 1)] =
-            error * 1 / 16 + data[(y + 1) * cols + (x + 1)];
+            error * BOT_RIGHT + data[(y + 1) * cols + (x + 1)];
     }
 }
 
@@ -103,7 +108,7 @@ int16_t update_and_compute_error(int16_t* data, size_t i) {
 void sequential_floyd_steinberg(int16_t* data, size_t rows, size_t cols) {
     for (size_t y = 0; y < rows; y++) {
         for (size_t x = 0; x < cols; x++) {
-            int16_t error = update_and_compute_error(data + y * cols, x);
+            int16_t error = update_and_compute_error(data, y * cols + x);
             propagate_error_local(data, rows, cols, error, x, y);
         }
     }
@@ -140,12 +145,12 @@ void propagate_error_for_sending(int16_t* data,
     size_t buf_size = NB_BUFFERS * block_size;
 
     if (!(block_index == blocks_per_line - 1 && i == block_size - 1)) {
-        data[offset + i + 1] = error * 7 / 16 + data[offset + i + 1];
+        data[offset + i + 1] = error * RIGHT + data[offset + i + 1];
 
-        error_to_bot[(base_index + 1) % buf_size] += error * 1 / 16;
+        error_to_bot[(base_index + 1) % buf_size] += error * BOT_RIGHT;
     }
-    error_to_bot[base_index % buf_size] += error * 5 / 16;
-    error_to_bot[(base_index - 1) % buf_size] += error * 3 / 16;
+    error_to_bot[base_index % buf_size] += error * BOT;
+    error_to_bot[(base_index - 1) % buf_size] += error * BOT_LEFT;
 }
 
 void fs_mpi(int16_t* local_data,
@@ -167,18 +172,18 @@ void fs_mpi(int16_t* local_data,
         my_rank, lines_per_process, line_block_size,
         lines_per_process / line_block_size);
 
-    for (size_t block_of_lines = 0;
-         block_of_lines < lines_per_process / line_block_size;
-         block_of_lines++) {
-        printf("[%d] block_of_lines = %d\n", my_rank, block_of_lines);
+    // for (size_t block_of_lines = 0;
+    //      block_of_lines < lines_per_process / line_block_size;
+    //      block_of_lines++) {
+    for (size_t line = 0; line < lines_per_process; line += line_block_size) {
+        // printf("[%d] block_of_lines = %d\n", my_rank, block_of_lines);
         /* ----- First Line ----- */
         {
             for (size_t block_index = 0; block_index < cols / block_size;
                  block_index++) {
                 size_t elem_offset = block_index * block_size;
-                size_t offset =
-                    block_of_lines * line_block_size * cols + elem_offset;
-                if (!(my_rank == 0 && block_of_lines == 0)) {
+                size_t offset = line * cols + elem_offset;
+                if (!(my_rank == 0 && line == 0)) {
                     /* ----- If this is not the top of the image, we receive the
                      * error from the above process */
                     MPI_Recv(error_from_top, block_size, MPI_INT16_T,
@@ -194,13 +199,13 @@ void fs_mpi(int16_t* local_data,
                 for (size_t i = 0; i < block_size && elem_offset + i < cols;
                      i++) {
                     int16_t error =
-                        update_and_compute_error(local_data + offset, i);
+                        update_and_compute_error(local_data, i + offset);
 
                     if (line_block_size > 1) {
-                        propagate_error_local(local_data, line_block_size, cols,
-                                              error,
-                                              i + block_index * block_size,
-                                              block_of_lines * line_block_size);
+                        propagate_error_local(local_data + line * cols,
+                                              line_block_size, cols, error,
+                                              i + block_index * block_size, 0);
+                        // block_of_lines * line_block_size * cols);
                     } else {
                         propagate_error_for_sending(
                             local_data, block_index, block_size,
@@ -210,7 +215,7 @@ void fs_mpi(int16_t* local_data,
                 /* If we have blocks of one line, we have to send the data to
                  * the process below */
                 if (line_block_size == 1 && block_index != 0 &&
-                    !(block_of_lines == lines_per_process - 1 &&
+                    !(line == lines_per_process - 1 &&
                       my_rank == world_size - 1)) {
                     send_below(block_index, block_size, my_rank, world_size,
                                error_to_bot);
@@ -221,21 +226,20 @@ void fs_mpi(int16_t* local_data,
         if (line_block_size > 2) {
             /* We skip the first and last line of the block as they require some
              * communications */
-            sequential_floyd_steinberg(
-                local_data + block_of_lines * cols * line_block_size + 1,
-                line_block_size - 2, cols);
+            sequential_floyd_steinberg(local_data + (line + 1) * cols,
+                                       line_block_size - 2, cols);
         } else if (line_block_size == 2) {
             /* We just have to dither and send the data */
+            size_t line_bot = line + line_block_size - 1;
             for (size_t block_index = 0; block_index < cols / block_size;
                  block_index++) {
                 size_t elem_offset = block_index * block_size;
-                size_t offset =
-                    block_of_lines * line_block_size * cols + elem_offset;
+                size_t offset = line_bot * cols + elem_offset;
                 /* ----- Compute the local error ----- */
                 for (size_t i = 0; i < block_size && elem_offset + i < cols;
                      i++) {
                     int16_t error =
-                        update_and_compute_error(local_data + offset, i);
+                        update_and_compute_error(local_data, i + offset);
 
                     propagate_error_for_sending(local_data, block_index,
                                                 block_size, blocks_per_line, i,
@@ -244,7 +248,7 @@ void fs_mpi(int16_t* local_data,
                 /* If we have blocks of one line, we have to send the data to
                  * the process below */
                 if (block_index != 0 &&
-                    !(block_of_lines == lines_per_process - 1 &&
+                    !(line_bot == lines_per_process - 1 &&
                       my_rank == world_size - 1)) {
                     send_below(block_index, block_size, my_rank, world_size,
                                error_to_bot);
@@ -252,10 +256,10 @@ void fs_mpi(int16_t* local_data,
             }
         }
         if (line_block_size <= 2) {
-            if (!(block_of_lines == (lines_per_process / line_block_size) - 1 &&
+            if (!(line + line_block_size - 1 == lines_per_process - 1 &&
                   my_rank == world_size - 1)) {
-                send_below(block_of_lines - 1, block_size, my_rank, world_size,
-                           error_to_bot);
+                send_below((cols / block_size) - 1, block_size, my_rank,
+                           world_size, error_to_bot);
             }
         }
     }
