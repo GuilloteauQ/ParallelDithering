@@ -119,20 +119,26 @@ void sequential_floyd_steinberg(int16_t* data,
 
 void send_below(size_t block_index,
                 size_t block_size,
+                size_t line,
+                size_t lines_per_process,
                 int my_rank,
                 int world_size,
                 int16_t* error_to_bot) {
-    MPI_Request req;
-    size_t index_block_to_send =
-        ((block_index % NB_BUFFERS) + NB_BUFFERS - 1) % NB_BUFFERS;
+    if (block_index != 0 &&
+        !(line == lines_per_process - 1 && my_rank == world_size - 1)) {
+        MPI_Request req;
+        size_t index_block_to_send =
+            ((block_index % NB_BUFFERS) + NB_BUFFERS - 1) % NB_BUFFERS;
 
-    printf("[%d] Sending to %d\n", my_rank, (my_rank + 1) % world_size);
-    MPI_Isend(error_to_bot + index_block_to_send * block_size, block_size,
-              MPI_INT16_T, (my_rank + 1) % world_size, 0, MPI_COMM_WORLD, &req);
-    MPI_Request_free(&req);
-    // reinit values
-    for (size_t i = 0; i < block_size; i++) {
-        (error_to_bot + index_block_to_send * block_size)[i] = 0;
+        printf("[%d] Sending to %d\n", my_rank, (my_rank + 1) % world_size);
+        size_t offset = index_block_to_send * block_size;  // * sizeof(int16_t);
+        MPI_Isend(error_to_bot + offset, block_size, MPI_INT16_T,
+                  (my_rank + 1) % world_size, 0, MPI_COMM_WORLD, &req);
+        MPI_Request_free(&req);
+        // reinit values
+        for (size_t i = 0; i < block_size; i++) {
+            (error_to_bot + offset)[i] = 0;
+        }
     }
 }
 
@@ -221,11 +227,9 @@ void fs_mpi(int16_t* local_data,
                 }
                 /* If we have blocks of one line, we have to send the data to
                  * the process below */
-                if (line_block_size == 1 && block_index != 0 &&
-                    !(line == lines_per_process - 1 &&
-                      my_rank == world_size - 1)) {
-                    send_below(block_index, block_size, my_rank, world_size,
-                               error_to_bot);
+                if (line_block_size == 1) {
+                    send_below(block_index, block_size, line, lines_per_process,
+                               my_rank, world_size, error_to_bot);
                 }
             }
         }
@@ -233,9 +237,8 @@ void fs_mpi(int16_t* local_data,
         if (line_block_size > 2) {
             /* We skip the first and last line of the block as they require some
              * communications */
-            sequential_floyd_steinberg(
-                local_data + (line + 1) * cols * sizeof(int16_t),
-                line_block_size - 2, cols, 1);
+            sequential_floyd_steinberg(local_data + (line + 1) * cols,
+                                       line_block_size - 2, cols, 1);
             printf("[%d] Done sequential part\n", my_rank);
         }
         if (line_block_size > 1) {
@@ -257,21 +260,12 @@ void fs_mpi(int16_t* local_data,
                 }
                 /* If we have blocks of one line, we have to send the data to
                  * the process below */
-                if (block_index != 0 &&
-                    !(line_bot == lines_per_process - 1 &&
-                      my_rank == world_size - 1)) {
-                    send_below(block_index, block_size, my_rank, world_size,
-                               error_to_bot);
-                }
+                send_below(block_index, block_size, line_bot, lines_per_process,
+                           my_rank, world_size, error_to_bot);
             }
         }
-        // if (line_block_size <= 2) {
-        if (!(line + line_block_size - 1 == lines_per_process - 1 &&
-              my_rank == world_size - 1)) {
-            send_below((cols / block_size) - 1, block_size, my_rank, world_size,
-                       error_to_bot);
-        }
-        // }
+        send_below(cols / block_size, block_size, line + line_block_size - 1,
+                   lines_per_process, my_rank, world_size, error_to_bot);
     }
 }
 
