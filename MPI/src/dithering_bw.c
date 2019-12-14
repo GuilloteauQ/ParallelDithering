@@ -56,10 +56,6 @@ void write_image_to_file(Image* image, char* filename) {
     for (size_t i = 0; i < image->cols; i++) {
         for (size_t j = 0; j < image->rows; j++) {
             int16_t p = image->pixels[i * image->rows + j];
-            // if (p < 256 && p >= 0)
-            //     fprintf(output_file, "%d ", p);
-            // else
-            //     printf("weird value : %d\n", p);
             assert(p < 256 && p >= 0);
             fprintf(output_file, "%d ", p);
         }
@@ -131,19 +127,23 @@ void send_below(size_t block_index,
     if (block_index != 0 &&
         !(line >= lines_per_process - 1 && my_rank == world_size - 1)) {
         MPI_Request req;
+        // Error Buffer to send
         size_t index_block_to_send =
-            ((block_index % NB_BUFFERS) + NB_BUFFERS - 1) % NB_BUFFERS;
+            ((block_index % NB_BUFFERS) + (NB_BUFFERS - 1)) % NB_BUFFERS;
 
-        printf("[%d] Sending to %d (line %d / %d) block #%d\n", my_rank,
-               (my_rank + 1) % world_size, line, lines_per_process,
-               block_index);
-        size_t offset = index_block_to_send * block_size;  // * sizeof(int16_t);
+        // printf("[%d] Sending to %d (line %d / %d) block #%d\n", my_rank,
+        //        (my_rank + 1) % world_size, line, lines_per_process,
+        //        block_index);
+        size_t offset = index_block_to_send * block_size;
         MPI_Isend(error_to_bot + offset, block_size, MPI_INT16_T,
-                  (my_rank + 1) % world_size, 0, MPI_COMM_WORLD, &req);
-        MPI_Request_free(&req);
+                  (my_rank + 1) % world_size, block_index - 1, MPI_COMM_WORLD,
+                  &req);
+        // TODO : ?
+        // MPI_Request_free(&req);
+        MPI_Wait(&req, MPI_STATUS_IGNORE);
         // reinit values
         for (size_t i = 0; i < block_size; i++) {
-            (error_to_bot + offset)[i] = 0;
+            error_to_bot[i + offset] = 0;
         }
     }
 }
@@ -152,6 +152,7 @@ void propagate_error_for_sending(int16_t* data,
                                  size_t block_index,
                                  size_t block_size,
                                  size_t blocks_per_line,
+                                 size_t cols,
                                  size_t i,
                                  size_t offset,
                                  int16_t* error_to_bot,
@@ -161,7 +162,9 @@ void propagate_error_for_sending(int16_t* data,
     size_t buf_size = NB_BUFFERS * block_size;
 
     if (!(block_index == blocks_per_line - 1 && i == block_size - 1)) {
-        data[offset + i + 1] = error * RIGHT + data[offset + i + 1];
+        if (block_index * block_size + i + 1 < cols) {
+            data[offset + i + 1] = error * RIGHT + data[offset + i + 1];
+        }
         error_to_bot[(base_index + 1) % buf_size] += error * BOT_RIGHT;
     }
     error_to_bot[base_index % buf_size] += error * BOT;
@@ -181,11 +184,11 @@ void fs_mpi(int16_t* local_data,
     size_t buf_size = NB_BUFFERS * block_size;
     int16_t* error_to_bot = calloc(buf_size, sizeof(int16_t));
     size_t blocks_per_line = cols / block_size;
-    printf(
-        "Process %d, lines_per_process: %d, line_block_size: %d, "
-        "lines_per_process / line_block_size: %d, blocks_per_line %d \n",
-        my_rank, lines_per_process, line_block_size,
-        lines_per_process / line_block_size, blocks_per_line);
+    // printf(
+    //     "Process %d, lines_per_process: %d, line_block_size: %d, "
+    //     "lines_per_process / line_block_size: %d, blocks_per_line %d \n",
+    //     my_rank, lines_per_process, line_block_size,
+    //     lines_per_process / line_block_size, blocks_per_line);
 
     // for (size_t block_of_lines = 0;
     //      block_of_lines < lines_per_process / line_block_size;
@@ -201,13 +204,13 @@ void fs_mpi(int16_t* local_data,
                 if (!(my_rank == 0 && line == 0)) {
                     /* ----- If this is not the top of the image, we receive the
                      * error from the above process */
-                    printf("[%d] Ready to recv from %d\n", my_rank,
-                           (my_rank + world_size - 1) % world_size);
+                    // printf("[%d] Ready to recv from %d\n", my_rank,
+                    //        (my_rank + world_size - 1) % world_size);
                     MPI_Recv(error_from_top, block_size, MPI_INT16_T,
-                             (my_rank + world_size - 1) % world_size, 0,
-                             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    printf("[%d] Done recving from %d\n", my_rank,
-                           (my_rank + world_size - 1) % world_size);
+                             (my_rank + world_size - 1) % world_size,
+                             block_index, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    // printf("[%d] Done recving from %d\n", my_rank,
+                    //        (my_rank + world_size - 1) % world_size);
                     /* ----- We add the error to the local data ----- */
                     for (size_t i = 0;
                          i < block_size && block_offset + i < cols; i++) {
@@ -220,15 +223,20 @@ void fs_mpi(int16_t* local_data,
                     int16_t error =
                         update_and_compute_error(local_data, i + offset);
 
-                    if (line_block_size > 1) {
+                    if (line_block_size == 1) {
+                        /* If we have to send right away */
+                        propagate_error_for_sending(local_data, block_index,
+                                                    block_size, blocks_per_line,
+                                                    cols, i, offset,
+                                                    error_to_bot, error);
+
+                    } else {
                         propagate_error_local(
                             local_data, lines_per_process, cols, error,
                             i + block_size * block_index, line);
-                    } else {
-                        propagate_error_for_sending(
-                            local_data, block_index, block_size,
-                            blocks_per_line, i, offset, error_to_bot, error);
                     }
+                    assert(local_data[i + offset] == 255 ||
+                           local_data[i + offset] == 0);
                 }
                 /* If we have blocks of one line, we have to send the data to
                  * the process below */
@@ -239,20 +247,26 @@ void fs_mpi(int16_t* local_data,
             }
         }
         /* ----- Sequential Part ----- */
-        if (line_block_size > 2) {
-            /* We skip the first and last line of the block as they require some
-             * communications */
-            size_t seq_lines = (line_block_size > lines_per_process - line)
-                                   ? lines_per_process - line - 2
-                                   : line_block_size - 2;
+        if (line_block_size >= 3) {
+            if (line_block_size > lines_per_process - line) {
+                /* If the line_block_size is greater than the number of lines
+                 * remaining, we update the value to make sure that we don't
+                 * access junk data. */
+                line_block_size = lines_per_process - line;
+            }
+            /* ``-2`` because we don't care about the first line of the block
+             * (because we recv data) and the last line (because we send data).
+             * So the only lines that we can do sequentially are between the
+             * first and the last lines excluded */
             sequential_floyd_steinberg(local_data + (line + 1) * cols,
-                                       seq_lines, cols, 1);
-            printf("[%d] Done sequential part\n", my_rank);
+                                       line_block_size - 2, cols, 1);
+            // printf("[%d] Done sequential part\n", my_rank);
         }
-        if (line_block_size > 1) {
+        // Last line
+        if (line_block_size >= 2) {
             /* We just have to dither and send the data */
             size_t line_bot = line + line_block_size - 1;
-            for (size_t block_index = 0; block_index < cols / block_size;
+            for (size_t block_index = 0; block_index < blocks_per_line;
                  block_index++) {
                 size_t block_offset = block_index * block_size;
                 size_t offset = line_bot * cols + block_offset;
@@ -262,9 +276,12 @@ void fs_mpi(int16_t* local_data,
                     int16_t error =
                         update_and_compute_error(local_data, i + offset);
 
-                    propagate_error_for_sending(local_data, block_index,
-                                                block_size, blocks_per_line, i,
-                                                offset, error_to_bot, error);
+                    propagate_error_for_sending(
+                        local_data, block_index, block_size, blocks_per_line,
+                        cols, i, offset, error_to_bot, error);
+
+                    assert(local_data[i + offset] < 256 &&
+                           local_data[i + offset] >= 0);
                 }
                 /* If we have blocks of one line, we have to send the data to
                  * the process below */
@@ -272,16 +289,20 @@ void fs_mpi(int16_t* local_data,
                            my_rank, world_size, error_to_bot);
             }
         }
-        printf("[%d] Ready to send the last block \n", my_rank);
+        /* Sends the last block of the block of line */
+        // printf("[%d] Ready to send the last block \n", my_rank);
         send_below(blocks_per_line, block_size, line + line_block_size - 1,
                    lines_per_process, my_rank, world_size, error_to_bot);
-        printf("[%d] Done sending the last block \n", my_rank);
+        // printf("[%d] Done sending the last block \n", my_rank);
     }
-    for (size_t i = 0; i < lines_per_process * cols; i++) {
-        if (!(local_data[i] >= 0 && local_data[i] < 256)) {
-            printf("[%d] local_data[%d] = %d ...\n", my_rank, i, local_data[i]);
-        }
-    }
+    // for (size_t i = 0; i < lines_per_process * cols; i++) {
+    //     if (!(local_data[i] >= 0 && local_data[i] < 256)) {
+    //         printf("[%d] local_data[%d] = %d ...\n", my_rank, i,
+    //         local_data[i]);
+    //     }
+    // }
+    free(error_from_top);
+    free(error_to_bot);
 }
 
 void floyd_steinberg_mpi(int16_t* local_data,
@@ -386,17 +407,17 @@ int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
     char* filename = argv[1];
-    char* out_filename = (argc == 3) ? argv[2] : "out_mpi.pgm";
+    char* out_filename = "out_mpi.pgm";
+    uint32_t block_size = atoi(argv[2]);
+    size_t line_block_size = atoi(argv[3]);
 
     Image* ppm_image;
     uint32_t h;
     uint32_t w;
-    uint32_t block_size;
     int world_size = get_world_size();
     int my_rank = get_my_rank();
     int root = world_size - 1;
     int16_t* pixels = NULL;
-    size_t line_block_size = 3;
     MPI_Datatype PixelLine;
 
     if (my_rank == root) {
@@ -404,7 +425,7 @@ int main(int argc, char** argv) {
         pixels = ppm_image->pixels;
         h = (uint32_t)ppm_image->rows;
         w = (uint32_t)ppm_image->cols;
-        block_size = (uint32_t)find_block_size(w, (size_t)world_size);
+        // block_size = (uint32_t)find_block_size(w, (size_t)world_size);
     }
 
     double start_time, end_time;
@@ -424,7 +445,8 @@ int main(int argc, char** argv) {
                     w * line_block_size, world_size * w * line_block_size,
                     MPI_INT16_T, &PixelLine);
     MPI_Type_commit(&PixelLine);
-    printf("world_size %d, line_block_size %d\n", world_size, line_block_size);
+    // printf("world_size %d, line_block_size %d\n", world_size,
+    // line_block_size);
     /* ----- Sending the data ----- */
     if (my_rank == root) {
         MPI_Request req;
@@ -440,19 +462,19 @@ int main(int argc, char** argv) {
     // lines_to_send_per_process);
     fs_mpi(local_data, block_size, w, lines_to_send_per_process,
            line_block_size);
-    printf("[%d] Done dithering\n", my_rank);
+    // printf("[%d] Done dithering\n", my_rank);
 
     MPI_Request req;
     MPI_Isend(local_data, cells_to_send_per_process, MPI_INT16_T, root, 99,
               MPI_COMM_WORLD, &req);
 
-    printf("[%d] Done sending new pixels\n", my_rank);
+    // printf("[%d] Done sending new pixels\n", my_rank);
     if (my_rank == root) {
         for (size_t i = 0; i < world_size; i++) {
-            printf("[%d] Ready to receive new pixels from %d\n", my_rank, i);
+            // printf("[%d] Ready to receive new pixels from %d\n", my_rank, i);
             MPI_Recv(pixels + i * w * line_block_size, 1, PixelLine, i, 99,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            printf("[%d] Done receiving new pixels from %d\n", my_rank, i);
+            // printf("[%d] Done receiving new pixels from %d\n", my_rank, i);
         }
     }
     MPI_Wait(&req, MPI_STATUS_IGNORE);
@@ -475,16 +497,11 @@ int main(int argc, char** argv) {
         free(ppm_image);
         double par_time = end_time - start_time;
         double seq_time = seq_end_time - seq_start_time;
-        // double speedup = seq_time / par_time;
-        // double efficiency = speedup / (double)world_size
-        // H W P block_size par seq
-        printf("%d %d %d %d %f %f\n", h, w, world_size, block_size, par_time,
-               seq_time);
-        // printf(
-        //     "Execution Time:\n\tPar %f s\n\tSeq %f s\n\tSpeedup "
-        //     "%f\n\tEfficiency %f\n",
-        //     par_time, seq_time, speedup, efficiency);
+        // H W P block_size r par seq
+        printf("%d %d %d %d %lu %f %f\n", h, w, world_size, block_size,
+               line_block_size, par_time, seq_time);
     }
+    MPI_Barrier(MPI_COMM_WORLD);
     free(local_data);
     MPI_Finalize();
 
