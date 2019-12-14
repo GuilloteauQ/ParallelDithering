@@ -56,7 +56,9 @@ void write_image_to_file(Image* image, char* filename) {
     for (size_t i = 0; i < image->cols; i++) {
         for (size_t j = 0; j < image->rows; j++) {
             int16_t p = image->pixels[i * image->rows + j];
-            assert(p < 256 && p >= 0);
+            if (p != 255 && p != 0)
+                printf("ohoh p[i:%d, j:%d] = %d\n", j, i, p);
+            // assert(p < 256 && p >= 0);
             fprintf(output_file, "%d ", p);
         }
         fprintf(output_file, "\n");
@@ -131,13 +133,12 @@ void send_below(size_t block_index,
         size_t index_block_to_send =
             ((block_index % NB_BUFFERS) + (NB_BUFFERS - 1)) % NB_BUFFERS;
 
-        // printf("[%d] Sending to %d (line %d / %d) block #%d\n", my_rank,
-        //        (my_rank + 1) % world_size, line, lines_per_process,
-        //        block_index);
+        printf("[%d] Sending to %d (line %d / %d) block #%d\n", my_rank,
+               (my_rank + 1) % world_size, line, lines_per_process,
+               block_index);
         size_t offset = index_block_to_send * block_size;
         MPI_Isend(error_to_bot + offset, block_size, MPI_INT16_T,
-                  (my_rank + 1) % world_size, block_index - 1, MPI_COMM_WORLD,
-                  &req);
+                  (my_rank + 1) % world_size, 0, MPI_COMM_WORLD, &req);
         // TODO : ?
         // MPI_Request_free(&req);
         MPI_Wait(&req, MPI_STATUS_IGNORE);
@@ -169,6 +170,77 @@ void propagate_error_for_sending(int16_t* data,
     }
     error_to_bot[base_index % buf_size] += error * BOT;
     error_to_bot[(base_index - 1) % buf_size] += error * BOT_LEFT;
+}
+
+void fs_mpi_diagonal(int16_t* local_data,
+                     size_t block_size,
+                     size_t cols,
+                     size_t lines_per_process,
+                     size_t line_block_size) {
+    int world_size = get_world_size();
+    int my_rank = get_my_rank();
+
+    /* ----- Local Dithering ----- */
+    int16_t* error_from_top = calloc(block_size, sizeof(int16_t));
+    size_t buf_size = NB_BUFFERS * block_size;
+    int16_t* error_to_bot = calloc(buf_size, sizeof(int16_t));
+
+    size_t y = 0;
+    size_t blocks_per_line = cols / block_size;
+    size_t iter = blocks_per_line + line_block_size - 1;
+
+    while (y < lines_per_process) {
+        for (size_t k = 0; k < iter; k++) {
+            size_t i0 = (k >= blocks_per_line) ? blocks_per_line - 1 : k;
+            size_t j0 = (k >= blocks_per_line) ? k - i0 : 0;
+            assert(i0 + j0 == k);
+            /* ``i`` is in block_size */
+            int32_t j = j0;
+            for (int32_t i = i0; i >= 0 && j < line_block_size; i--) {
+                printf("[%lu] i0: %lu, j0: %lu, i: %lu, j: %lu, k: %lu\n",
+                       my_rank, i0, j0, i, j, k);
+
+                size_t offset = (y + j) * cols + i * block_size;
+                /* If I am not the top line of the image and if I am on the
+                 * top line of the block of lines, I have to receive from
+                 * the process above */
+                if (j == 0 && !(my_rank == 0 && y == 0)) {
+                    /* Receive the error from the process above */
+                    MPI_Recv(error_from_top, block_size, MPI_INT16_T,
+                             (my_rank + world_size - 1) % world_size, 0,
+                             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    /* Update the pixels values with the errors received */
+                    for (size_t b = 0; b < block_size; b++) {
+                        local_data[offset + b] += error_from_top[b];
+                    }
+                }
+                if (j == line_block_size - 1) {
+                    for (size_t b = 0; b < block_size; b++) {
+                        int16_t error =
+                            update_and_compute_error(local_data, b + offset);
+
+                        propagate_error_for_sending(
+                            local_data, i, block_size, blocks_per_line, cols, b,
+                            offset, error_to_bot, error);
+                    }
+                    send_below(i, block_size, y + j, lines_per_process, my_rank,
+                               world_size, error_to_bot);
+                } else {
+                    for (size_t b = 0; b < block_size; b++) {
+                        int16_t error =
+                            update_and_compute_error(local_data, b + offset);
+
+                        propagate_error_local(local_data, line_block_size, cols,
+                                              error, offset + b, j);
+                    }
+                }
+                j++;
+            }
+        }
+        y += line_block_size;
+        send_below(blocks_per_line, block_size, y - 1, lines_per_process,
+                   my_rank, world_size, error_to_bot);
+    }
 }
 
 void fs_mpi(int16_t* local_data,
@@ -460,21 +532,23 @@ int main(int argc, char** argv) {
 
     // floyd_steinberg_mpi(local_data, block_size, w,
     // lines_to_send_per_process);
-    fs_mpi(local_data, block_size, w, lines_to_send_per_process,
-           line_block_size);
-    // printf("[%d] Done dithering\n", my_rank);
+    // fs_mpi(local_data, block_size, w, lines_to_send_per_process,
+    //        line_block_size);
+    fs_mpi_diagonal(local_data, block_size, w, lines_to_send_per_process,
+                    line_block_size);
+    printf("[%d] Done dithering\n", my_rank);
 
     MPI_Request req;
     MPI_Isend(local_data, cells_to_send_per_process, MPI_INT16_T, root, 99,
               MPI_COMM_WORLD, &req);
 
-    // printf("[%d] Done sending new pixels\n", my_rank);
+    printf("[%d] Done sending new pixels\n", my_rank);
     if (my_rank == root) {
         for (size_t i = 0; i < world_size; i++) {
-            // printf("[%d] Ready to receive new pixels from %d\n", my_rank, i);
+            printf("[%d] Ready to receive new pixels from %d\n", my_rank, i);
             MPI_Recv(pixels + i * w * line_block_size, 1, PixelLine, i, 99,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            // printf("[%d] Done receiving new pixels from %d\n", my_rank, i);
+            printf("[%d] Done receiving new pixels from %d\n", my_rank, i);
         }
     }
     MPI_Wait(&req, MPI_STATUS_IGNORE);
