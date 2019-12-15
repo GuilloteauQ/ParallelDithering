@@ -136,9 +136,9 @@ void send_below(size_t block_index,
         size_t index_block_to_send =
             ((block_index % NB_BUFFERS) + (NB_BUFFERS - 1)) % NB_BUFFERS;
 
-        printf("[%d] Sending to %d (line %d / %d) block #%d\n", my_rank,
-               (my_rank + 1) % world_size, line, lines_per_process,
-               block_index);
+        // printf("[%d] Sending to %d (line %d / %d) block #%d\n", my_rank,
+        //        (my_rank + 1) % world_size, line, lines_per_process,
+        //        block_index);
         size_t offset = index_block_to_send * block_size;
         MPI_Isend(error_to_bot + offset, block_size, MPI_INT16_T,
                   (my_rank + 1) % world_size, 0, MPI_COMM_WORLD, &req);
@@ -200,8 +200,8 @@ void fs_mpi_diagonal(int16_t* local_data,
             /* ``i`` is in block_size */
             int32_t j = j0;
             for (int32_t i = i0; i >= 0 && j < line_block_size; i--) {
-                printf("[%lu] i0: %lu, j0: %lu, i: %lu, j: %lu, k: %lu\n",
-                       my_rank, i0, j0, i, j, k);
+                // printf("[%lu] i0: %lu, j0: %lu, i: %lu, j: %lu, k: %lu\n",
+                //        my_rank, i0, j0, i, j, k);
 
                 size_t offset = (y + j) * cols + i * block_size;
                 /* If I am not the top line of the image and if I am on the
@@ -209,10 +209,13 @@ void fs_mpi_diagonal(int16_t* local_data,
                  * the process above */
                 if (j == 0 && !(my_rank == 0 && y == 0)) {
                     /* Receive the error from the process above */
+
                     MPI_Recv(error_from_top, block_size, MPI_INT16_T,
                              (my_rank + world_size - 1) % world_size, 0,
                              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
                     /* Update the pixels values with the errors received */
+
                     for (size_t b = 0; b < block_size; b++) {
                         local_data[offset + b] += error_from_top[b];
                     }
@@ -230,24 +233,11 @@ void fs_mpi_diagonal(int16_t* local_data,
                                world_size, error_to_bot);
                 } else {
                     for (size_t b = 0; b < block_size; b++) {
-                        // if (i == 0 && b == 0) {
-                        //     printf(
-                        //         "BEFORE : i == 0 and b == 0; j = %d and "
-                        //         "data[b + offset] = %d\n",
-                        //         line_block_size * world_size + y + j,
-                        //         local_data[b + offset]);
-                        // }
                         int16_t error =
                             update_and_compute_error(local_data, b + offset);
 
-                        // if (i == 0 && b == 0) {
-                        //     printf(
-                        //         "AFTER : i == 0 and b == 0; y + j = %d and "
-                        //         "data[b + offset] = %d\n",
-                        //         y + j, local_data[b + offset]);
-                        // }
                         propagate_error_local(local_data, line_block_size, cols,
-                                              error, offset + b, j);
+                                              error, i * block_size + b, j + y);
                     }
                 }
                 j++;
@@ -590,8 +580,10 @@ int main(int argc, char** argv) {
         // H W P block_size r par seq
         printf("%d %d %d %d %lu %f %f\n", h, w, world_size, block_size,
                line_block_size, par_time, seq_time);
+    } else {
+        free(local_data);
     }
-    // free(local_data);
+    MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
 
     return 0;
