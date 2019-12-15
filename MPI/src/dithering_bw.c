@@ -95,15 +95,18 @@ void propagate_error_local(int16_t* data,
         }
         data[(y + 1) * cols + (x + 0)] =
             error * BOT + data[(y + 1) * cols + (x + 0)];
-        data[(y + 1) * cols + (x + 1)] =
-            error * BOT_RIGHT + data[(y + 1) * cols + (x + 1)];
+        if (x < cols - 1) {
+            data[(y + 1) * cols + (x + 1)] =
+                error * BOT_RIGHT + data[(y + 1) * cols + (x + 1)];
+        }
     }
 }
 
 int16_t update_and_compute_error(int16_t* data, size_t i) {
     int16_t current_value = data[i];
     int16_t new_value = (current_value < 127) ? 0 : 255;
-    data[i] = new_value;
+    // data[i] = new_value;
+    *(data + i) = new_value;
     return current_value - new_value;
 }
 
@@ -227,9 +230,22 @@ void fs_mpi_diagonal(int16_t* local_data,
                                world_size, error_to_bot);
                 } else {
                     for (size_t b = 0; b < block_size; b++) {
+                        // if (i == 0 && b == 0) {
+                        //     printf(
+                        //         "BEFORE : i == 0 and b == 0; j = %d and "
+                        //         "data[b + offset] = %d\n",
+                        //         line_block_size * world_size + y + j,
+                        //         local_data[b + offset]);
+                        // }
                         int16_t error =
                             update_and_compute_error(local_data, b + offset);
 
+                        // if (i == 0 && b == 0) {
+                        //     printf(
+                        //         "AFTER : i == 0 and b == 0; y + j = %d and "
+                        //         "data[b + offset] = %d\n",
+                        //         y + j, local_data[b + offset]);
+                        // }
                         propagate_error_local(local_data, line_block_size, cols,
                                               error, offset + b, j);
                     }
@@ -279,8 +295,8 @@ void fs_mpi(int16_t* local_data,
                     // printf("[%d] Ready to recv from %d\n", my_rank,
                     //        (my_rank + world_size - 1) % world_size);
                     MPI_Recv(error_from_top, block_size, MPI_INT16_T,
-                             (my_rank + world_size - 1) % world_size,
-                             block_index, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                             (my_rank + world_size - 1) % world_size, 0,
+                             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                     // printf("[%d] Done recving from %d\n", my_rank,
                     //        (my_rank + world_size - 1) % world_size);
                     /* ----- We add the error to the local data ----- */
@@ -575,8 +591,7 @@ int main(int argc, char** argv) {
         printf("%d %d %d %d %lu %f %f\n", h, w, world_size, block_size,
                line_block_size, par_time, seq_time);
     }
-    MPI_Barrier(MPI_COMM_WORLD);
-    free(local_data);
+    // free(local_data);
     MPI_Finalize();
 
     return 0;
