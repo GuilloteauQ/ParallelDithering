@@ -50,7 +50,7 @@ Image* read_image_from_file(char* filename) {
 
 void write_image_to_file(Image* image, char* filename) {
     FILE* output_file = fopen(filename, "w");
-    fprintf(output_file, "P2\n");
+    fprintf(output_file, "P5\n");
     fprintf(output_file, "%lu %lu\n", image->cols, image->rows);
     fprintf(output_file, "%lu\n", image->max_val);
     for (size_t i = 0; i < image->cols; i++) {
@@ -59,9 +59,10 @@ void write_image_to_file(Image* image, char* filename) {
             if (p != 255 && p != 0)
                 printf("ohoh p[i:%d, j:%d] = %d\n", j, i, p);
             // assert(p < 256 && p >= 0);
-            fprintf(output_file, "%d ", p);
+            // fprintf(output_file, "%d ", p);
+            fprintf(output_file, "%c", p);
         }
-        fprintf(output_file, "\n");
+        // fprintf(output_file, "\n");
     }
     fclose(output_file);
 }

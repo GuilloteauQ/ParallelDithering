@@ -39,15 +39,15 @@ Image* read_image_from_file(char* filename) {
 
 void write_image_to_file(Image* image, char* filename) {
     FILE* output_file = fopen(filename, "w");
-    fprintf(output_file, "P2\n");
+    fprintf(output_file, "P5\n");
     fprintf(output_file, "%lu %lu\n", image->cols, image->rows);
     fprintf(output_file, "%lu\n", image->max_val);
     for (size_t i = 0; i < image->cols; i++) {
         for (size_t j = 0; j < image->rows; j++) {
             int16_t p = image->pixels[i * image->rows + j];
-            fprintf(output_file, "%d ", p);
+            fprintf(output_file, "%c", p);
         }
-        fprintf(output_file, "\n");
+        // fprintf(output_file, "\n");
     }
     fclose(output_file);
 }
