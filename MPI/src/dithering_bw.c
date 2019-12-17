@@ -137,9 +137,9 @@ void send_below(size_t block_index,
         size_t index_block_to_send =
             ((block_index % NB_BUFFERS) + (NB_BUFFERS - 1)) % NB_BUFFERS;
 
-        printf("[%d] Sending to %d (line %d / %d) block #%d\n", my_rank,
-               (my_rank + 1) % world_size, line, lines_per_process,
-               block_index);
+        // printf("[%d] Sending to %d (line %d / %d) block #%d\n", my_rank,
+        //        (my_rank + 1) % world_size, line, lines_per_process,
+        //        block_index);
         size_t offset = index_block_to_send * block_size;
         MPI_Isend(error_to_bot + offset, block_size, MPI_INT16_T,
                   (my_rank + 1) % world_size, block_index - 1, MPI_COMM_WORLD,
@@ -540,19 +540,19 @@ int main(int argc, char** argv) {
     //        line_block_size);
     fs_mpi_diagonal(local_data, block_size, w, lines_to_send_per_process,
                     line_block_size);
-    printf("[%d] Done dithering\n", my_rank);
+    // printf("[%d] Done dithering\n", my_rank);
 
     MPI_Request req;
     MPI_Isend(local_data, cells_to_send_per_process, MPI_INT16_T, root, 99,
               MPI_COMM_WORLD, &req);
 
-    printf("[%d] Done sending new pixels\n", my_rank);
+    // printf("[%d] Done sending new pixels\n", my_rank);
     if (my_rank == root) {
         for (size_t i = 0; i < world_size; i++) {
-            printf("[%d] Ready to receive new pixels from %d\n", my_rank, i);
+            // printf("[%d] Ready to receive new pixels from %d\n", my_rank, i);
             MPI_Recv(pixels + i * w * line_block_size, 1, PixelLine, i, 99,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            printf("[%d] Done receiving new pixels from %d\n", my_rank, i);
+            // printf("[%d] Done receiving new pixels from %d\n", my_rank, i);
         }
     }
     MPI_Wait(&req, MPI_STATUS_IGNORE);

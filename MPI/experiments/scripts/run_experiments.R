@@ -20,4 +20,5 @@ commands <- paste(duplicates_commands, ";", "mpirun -np", valid_experiments$proc
 
 
 head(commands)
-# system(commands[1])
+system(commands[1])
+system(commands[2])
