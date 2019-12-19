@@ -10,7 +10,7 @@ SRC_FOLDER = src
 TARGET_FOLDER = bin
 
 make_bin_folder:
-	mkdir -p bin
+	mkdir -p bin > /dev/null
 
 duplicate_image: $(TARGET_FOLDER)/duplicate_image.o $(TARGET_FOLDER)/Util.o
 	gcc -o $@ $^ $(LDFLAGS)

@@ -1,0 +1,182 @@
+---
+title: "Parallel Dithering: Is a speedup reachable ?"
+author: Quentin Guilloteau
+classoption: twocolumn
+header-includes:
+    - \usepackage{graphicx}
+    - \usepackage{tikz}
+output:
+    pdf_document:
+        keep_tex: true
+    html_document:
+        keep_tex: true
+---
+
+# Introduction
+
+## Dithering
+
+Dithering is the action to convert a grey scale image into an image composed only of black and white pixels.
+
+
+\begin{figure}[h]
+    \center
+    \includegraphics[width=170px]{Images/charlie.png}
+    \caption{Grey Scale Image}
+\end{figure}
+
+\begin{figure}[h]
+    \center
+    \includegraphics[width=170px]{Images/charlie_d.png}
+    \caption{Dithered Image}
+\end{figure}
+
+## Floyd-Steinberg Dithering
+
+There are many different possible ditherings.
+They all use the same principles, only some numerical constants change.
+In this paper, we will only focus on the __Floyd-Steinberg Dithering__.
+It uses error diffusion.
+
+The error diffusion matrix is the following:
+
+$$
+\displaystyle \left[ \begin{matrix}
+    0 & 0 & 0 \\
+    0 & 0 & \frac{7}{16} \\
+    \frac{3}{16} & \frac{5}{16} & \frac{1}{16} \\
+    \end{matrix}
+    \right]
+$$
+
+\begin{figure}
+\center
+\begin{tikzpicture}
+    \draw (0,0) grid (3,2);
+    \draw [->] (1.5,1.5) -- (2.25,1.5);
+    \draw [->] (1.5,1.5) -- (2.25,0.75);
+    \draw [->] (1.5,1.5) -- (1.5,0.75);
+    \draw [->] (1.5,1.5) -- (0.75,0.75);
+    \draw (2.5, 1.5) node {$\frac{7}{16}$};
+    \draw (2.5, 0.5) node {$\frac{1}{16}$};
+    \draw (1.5, 0.5) node {$\frac{5}{16}$};
+    \draw (0.5, 0.5) node {$\frac{3}{16}$};
+\end{tikzpicture}
+\caption{Error Diffusion for the Floyd-Steinberg Dithering}
+\end{figure}
+
+Figure \ref{fig:local_deps} shows another way to look at it, by considering the dependencies for a single pixel.
+
+\begin{figure}
+\center
+\begin{tikzpicture}
+    \draw (0,0) grid (3,2);
+    \draw [->] (1.5,1.25) -- (1.5,0.75);
+    \draw [->] (2.25,1.25) -- (1.75,0.75);
+    \draw [->] (0.75,1.25) -- (1.25,0.75);
+    \draw [->] (0.75,0.5) -- (1.25,0.5);
+    \draw (2.5, 1.5) node {$\frac{3}{16}$};
+    \draw (0.5, 1.5) node {$\frac{1}{16}$};
+    \draw (1.5, 1.5) node {$\frac{5}{16}$};
+    \draw (0.5, 0.5) node {$\frac{7}{16}$};
+\end{tikzpicture}
+\caption{Local Dependencies of the Floyd-Steinberg Dithering}
+\label{fig:local_deps}
+\end{figure}
+
+## Pseudo-Code
+
+We can write the pseudo code of the Floyd-Steinberg Dithering:
+
+```C
+for (y = 0; y < rows; y++) {
+  for (x = 0; x < cols; x++) {
+    // Computation of the error
+    int old_value = pixels[y * cols + x];
+    int new_value = (current_value < 127) ?
+                    0 : 255;
+    int error = old_value - new_value;
+    pixels[y * cols + x] = new_value;
+
+    // Error Propagation
+    pixels[(y + 0) * cols + (x + 1)]
+        += error * 7 / 16;
+    pixels[(y + 1) * cols + (x + 1)]
+        += error * 1 / 16;
+    pixels[(y + 1) * cols + (x + 0)]
+        += error * 5 / 16;
+    pixels[(y + 1) * cols + (x - 1)]
+        += error * 3 / 16;
+
+  }
+}
+```
+
+As we can see, this algorithm is *highly sequential*.
+We have to start from the top left of the image and work ourselves to the right until we reach the end of the line.
+Then we start again from the next line.
+
+
+# Parallel Dithering
+
+The main idea of the paralle dithering, is that the progression looks more like a triangle than a rectangle:
+
+
+\begin{figure}
+    \center
+    \begin{tikzpicture}
+        \draw (0,0) grid (5,4);
+        \draw (0.5, 3.5) node {1};
+        \draw [gray] (1.5, 3.5) node {2};
+        \draw [red] (0.5, 2.5) node {3};
+        \draw [red] (2.5, 3.5) node {3};
+
+        \draw [orange] (3.5, 3.5) node {4};
+        \draw [orange] (1.5, 2.5) node {4};
+
+        \draw [blue] (0.5, 1.5) node {5};
+        \draw [blue] (2.5, 2.5) node {5};
+        \draw [blue] (4.5, 3.5) node {5};
+    \end{tikzpicture}
+
+\caption{Potential Parallel Execution}
+\label{fig:ppe}
+\end{figure}
+
+Figure \ref{fig:ppe}, shows that there are indeed some possible parallism in the dithering process.
+The numbers correspond to the order of the execution.
+When some pixels have the same number, it means that they can be processed in parallel.
+
+We also see that each line needs to be 2 pixels ahead of the line below.
+
+
+## Alternate processes
+
+The first idea is to alternate processes and giving them one line at the time to work with.
+
+\begin{figure}
+    \center
+    \begin{tikzpicture}
+        \draw (0,0) grid (5,4);
+        \draw [blue,thick] (0,3.02) rectangle (5, 3.98);
+        \draw [red,thick] (0,2.02) rectangle (5, 2.98);
+        \draw [blue,thick] (0,1.02) rectangle (5, 1.98);
+        \draw [red,thick] (0,0.02) rectangle (5, 0.98);
+
+        \draw [blue] (2.5, 1.5) node {Process 0};
+        \draw [blue] (2.5, 3.5) node {Process 0};
+        \draw [red] (2.5, 0.5) node {Process 1};
+        \draw [red] (2.5, 2.5) node {Process 1};
+    \end{tikzpicture}
+
+\caption{Data Distribution per Process}
+\label{fig:alternate_processes}
+\end{figure}
+
+Figure \ref{fig:alternate_processes} gives an example of the distribution of data between 2 processes.
+
+
+# Performances
+
+# Conclusion
+
