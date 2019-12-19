@@ -56,10 +56,6 @@ void write_image_to_file(Image* image, char* filename) {
     for (size_t i = 0; i < image->cols; i++) {
         for (size_t j = 0; j < image->rows; j++) {
             int16_t p = image->pixels[i * image->rows + j];
-            if (p != 255 && p != 0)
-                printf("ohoh p[i:%d, j:%d] = %d\n", j, i, p);
-            // assert(p < 256 && p >= 0);
-            // fprintf(output_file, "%d ", p);
             fprintf(output_file, "%c", p);
         }
         // fprintf(output_file, "\n");
