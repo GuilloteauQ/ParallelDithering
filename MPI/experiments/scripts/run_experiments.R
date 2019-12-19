@@ -6,10 +6,9 @@ experiments <- read.csv(file = "experiments/data/design_experiment.csv")
 
 valid_experiments <- experiments[(experiments$image_size / experiments$row_block_size) %% experiments$processors == 0,]
 
-head(valid_experiments)
 
 # Build the project
-system("make")
+system("make > /dev/null")
 
 mandrill_size <- 512
 tmp_image <- "Images/tmp.pgm"
@@ -19,6 +18,6 @@ duplicates_commands <- paste("./duplicate_image", "Images/mandrill.pgm", tmp_ima
 commands <- paste(duplicates_commands, ";", "mpirun -np", valid_experiments$processors, "./dithering_bw", tmp_image, valid_experiments$col_block_size, valid_experiments$row_block_size, sep = " ")
 
 
-head(commands)
-system(commands[1])
-system(commands[2])
+for (i in 1:10){#length(commands)) {
+    system(commands[i])
+}
