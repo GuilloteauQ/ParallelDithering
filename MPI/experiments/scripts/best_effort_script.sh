@@ -1,9 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 
-for ((i = 0; i < 100; i += 10))
+for i in {1..20..10}
 do
-    start= ${i}
-    final= ${i} + 9
-    ./run_experiments ${start} ${final} > ../data/output_${i}.csv
-end
-
+    lower_bound=${i}
+    upper_bound=$((i+10))
+    oarsub -t besteffort -l node=1 "./run_experiments.R ${lower_bound} ${upper_bound} > ../data/output_${i}.csv"
+done
