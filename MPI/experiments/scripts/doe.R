@@ -37,8 +37,8 @@ write.csv(file = "../data/design_experiment.csv", data_frame)
 
 
 number_of_runs <- 200
-min_image_size <- 4
-max_image_size <- 10
+min_image_size <- 9
+max_image_size <- 13
 max_block_size <- 8
 max_processors <- 3
 
