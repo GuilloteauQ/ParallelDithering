@@ -8,8 +8,10 @@ header-includes:
 output:
     pdf_document:
         keep_tex: true
+        number_sections: true
     html_document:
         keep_tex: true
+        number_sections: true
 ---
 
 # Introduction
@@ -152,6 +154,8 @@ We also see that each line needs to be 2 pixels ahead of the line below.
 
 ## Alternate processes
 
+### Presentation
+
 The first idea is to alternate processes and giving them one line at the time to work with.
 
 \begin{figure}
@@ -175,6 +179,147 @@ The first idea is to alternate processes and giving them one line at the time to
 
 Figure \ref{fig:alternate_processes} gives an example of the distribution of data between 2 processes.
 
+Process 0 will start working on the first pixel of its line.
+As we saw in figure \ref{fig:ppe}, a process must be done processing pixel $n$ of its line for the next process to be able to process the pixel $n - 2$ of its own line.
+
+### Implemenation Details
+
+### Performance Analysis
+\label{sec:alternate}
+
+Let $p$ be the number of processors.
+Let us consider a square image of size $n$.
+Let $L$ be the latency of the network and $B$ its bandwidth.
+Let $w$ be the processing time of a pixel.
+
+It takes $2 \times ( p - 1)$ steps before processor $P_{p - 1}$ can start processing the first pixel of its first line.
+
+Each processor has $\frac{n^2}{p}$ pixels.
+
+Therefore there are in total $2\times ( p - 1) + \frac{n^2}{p}$ steps.
+
+We thus have:
+
+\begin{equation}
+T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p} \right) \left( w + L + \frac{1}{B}\right)
+\end{equation}
+
+The sequential time is: $w\times n^2$.
+
+We can thus compute the speedup:
+
+$$
+\displaystyle S(n, p) = \frac{w \times n^2}{\left( 2\times ( p - 1) + \frac{n^2}{p} \right) \left( w + L + \frac{1}{B}\right)}
+$$
+
+The limit speedup is thus:
+
+\begin{equation}
+\displaystyle \lim _{n \rightarrow \infty} S(n, p) = \frac{w \times p}{w + L + \frac{1}{B}}
+\end{equation}
+
+The efficiency of this algorithm is:
+
+\begin{equation}
+\label{eq:eff1}
+\displaystyle Eff(n, p)  = \lim _{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w} + \frac{1}{B \times w}}
+\end{equation}
+
+The efficiency of this algorithm (equation \ref{eq:eff1}) is less than one.
+It thus means that it is not very efficient.
+
+## Reducing the Granularity
+
+### Presentation
+
+Sending the error every time a process process a pixel introduce too much loss due to the latency.
+We will try to reduce the granularity of the algorithm by grouping pixels per block.
+We will then also send the errors per block.
+
+TODO IMAGE
+
+TODO Compute the min block size to be ok
+
+### Implementation Details
+
+### Performance Analysis
+
+We pretty much have the same logic than in section \ref{sec:alternate}, with blocks instead of pixels.
+
+We note $k$ the size of a block.
+So a block contains $k$ pixels.
+
+\begin{equation}
+T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p \times k} \right) \left( w \times k + L + \frac{k}{B}\right)
+\end{equation}
+
+We compute next the speedup of this new version:
+
+$$
+\displaystyle S(n, p) = \frac{w \times n^2}{\left( 2\times ( p - 1) + \frac{n^2}{p\times k} \right) \left( w \times k + L + \frac{k}{B}\right)}
+$$
+
+The limit speedup is thus:
+
+\begin{equation}
+\displaystyle \lim _{n \rightarrow \infty} S(n, p) = \frac{w \times p \times k}{w \times k + L + \frac{k}{B}}
+\end{equation}
+
+The efficiency of this algorithm is:
+
+\begin{equation}
+\label{eq:eff2}
+\displaystyle Eff(n, p)  = \lim _{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w \times k} + \frac{1}{B\times w}}
+\end{equation}
+
+We see that we improve the efficiency of the algorithm by limiting the use of the network and reducing the global cost of the latency.
+
+## Limiting the Impact of the Bandwidth
+
+### Presentation
+
+In order to reduce the impact of the bandwith, we must send less messages through the network.
+In the previous section, we increased the size of the messages by sending pixels per block.
+In this section, we will create blocks of lines.
+Each process will have several blocks of lines.
+Each block of line will contain $r$ lines of pixels.
+Only the top and bottom lines of the block will require communications.
+The remaining pixels will be processed sequentially.
+
+
+TODO IMAGE
+
+### Implementation Details
+
+### Performance Anlysis
+
+We pretty much have the same logic than in section \ref{sec:alternate}, with blocks instead of pixels.
+
+\begin{equation}
+T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p \times k \times r} \right) \left( w \times k \times r + L + \frac{k}{B}\right)
+\end{equation}
+
+We compute next the speedup of this new version:
+
+$$
+\displaystyle S(n, p) = \frac{w \times n^2}{\left( 2\times ( p - 1) + \frac{n^2}{p\times k \times r} \right) \left( w \times k \times r + L + \frac{k}{B}\right)}
+$$
+
+The limit speedup is thus:
+
+\begin{equation}
+\displaystyle \lim _{n \rightarrow \infty} S(n, p) = \frac{w \times p \times k \times r}{w \times k \times r + L + \frac{k}{B}}
+\end{equation}
+
+The efficiency of this algorithm is:
+
+\begin{equation}
+\label{eq:eff3}
+\displaystyle Eff(n, p)  = \lim _{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w \times k \times r} + \frac{1}{B\times w \times r}}
+\end{equation}
+
+Once again, we manage to improve the efficiency of the algorithm by limiting the number of messages send.
+However, the efficiency if always less than 1.
 
 # Performances
 
