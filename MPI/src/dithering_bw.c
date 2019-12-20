@@ -63,6 +63,32 @@ void write_image_to_file(Image* image, char* filename) {
     fclose(output_file);
 }
 
+Image* duplicate(Image* image, size_t iter) {
+    size_t new_cols = image->cols * iter;
+    size_t new_rows = image->rows * iter;
+
+    int16_t* new_pixels = malloc(sizeof(int16_t) * new_cols * new_rows);
+
+    for (size_t j = 0; j < new_rows; j++) {
+        for (size_t i = 0; i < new_cols; i++) {
+            new_pixels[i + new_cols * j] =
+                image->pixels[(i % image->cols) +
+                              (j % image->rows) * image->cols];
+        }
+    }
+
+    Image* new_image = malloc(sizeof(Image));
+    new_image->cols = new_cols;
+    new_image->rows = new_rows;
+    new_image->max_val = image->max_val;
+    new_image->pixels = new_pixels;
+
+    free(image->pixels);
+    free(image);
+
+    return new_image;
+}
+
 int get_my_rank() {
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -482,6 +508,7 @@ int main(int argc, char** argv) {
     char* out_filename = "out_mpi.pgm";
     uint32_t block_size = atoi(argv[2]);
     size_t line_block_size = atoi(argv[3]);
+    size_t size_factor = atoi(argv[4]);
 
     Image* ppm_image;
     uint32_t h;
@@ -494,6 +521,8 @@ int main(int argc, char** argv) {
 
     if (my_rank == root) {
         ppm_image = read_image_from_file(filename);
+        ppm_image = duplicate(ppm_image, size_factor);
+
         pixels = ppm_image->pixels;
         h = (uint32_t)ppm_image->rows;
         w = (uint32_t)ppm_image->cols;
@@ -557,15 +586,16 @@ int main(int argc, char** argv) {
     end_time = MPI_Wtime();
 
     if (my_rank == root) {
-        write_image_to_file(ppm_image, out_filename);
+        // write_image_to_file(ppm_image, out_filename);
 
         double seq_start_time, seq_end_time;
         ppm_image = read_image_from_file(filename);
+        ppm_image = duplicate(ppm_image, size_factor);
         seq_start_time = MPI_Wtime();
         floyd_steinberg(ppm_image);
         seq_end_time = MPI_Wtime();
 
-        write_image_to_file(ppm_image, "seq.pgm");
+        // write_image_to_file(ppm_image, "seq.pgm");
 
         free(ppm_image->pixels);
         free(ppm_image);
