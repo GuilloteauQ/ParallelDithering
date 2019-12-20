@@ -11,13 +11,11 @@ valid_experiments <- experiments[(experiments$image_size / experiments$row_block
 system("make > /dev/null")
 
 mandrill_size <- 512
-tmp_image <- "Images/tmp.pgm"
 
-duplicates_commands <- paste("./duplicate_image", "Images/mandrill.pgm", tmp_image, (valid_experiments$image_size / mandrill_size), sep = " ")
+commands <- paste("mpirun -np", valid_experiments$processors, "./dithering_bw", "Image/mandrill.pgm",  valid_experiments$col_block_size, valid_experiments$row_block_size,(valid_experiments$image_size / mandrill_size) , sep = " ")
 
-commands <- paste(duplicates_commands, ";", "mpirun -np", valid_experiments$processors, "./dithering_bw", tmp_image, valid_experiments$col_block_size, valid_experiments$row_block_size, sep = " ")
-
+head(commands)
 
 for (i in 1:10){#length(commands)) {
-    system(commands[i])
+    # system(commands[i])
 }
