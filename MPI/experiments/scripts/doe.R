@@ -33,3 +33,32 @@ data_frame$processors <- pow2(data_frame$processors)
 head(data_frame)
 
 write.csv(file = "../data/design_experiment.csv", data_frame)
+
+
+
+number_of_runs <- 200
+min_image_size <- 4
+max_image_size <- 10
+max_block_size <- 8
+max_processors <- 3
+
+data_frame_rpi <- lhs.design(
+                         type = "maximin",
+                         nruns = number_of_runs,
+                         nfactors = 4,
+                         digits = 0,
+                         seed = 17440,
+                         factor.names = list(image_size = c(min_image_size, max_image_size),
+                                             row_block_size = c(1, max_block_size),
+                                             col_block_size = c(1, max_block_size),
+                                             processors = c(1, max_processors)))
+
+data_frame_rpi$image_size <- pow2(data_frame_rpi$image_size)
+data_frame_rpi$col_block_size <- pow2(data_frame_rpi$col_block_size)
+data_frame_rpi$row_block_size <- pow2(data_frame_rpi$row_block_size)
+data_frame_rpi$processors <- pow2(data_frame_rpi$processors)
+
+head(data_frame_rpi)
+
+write.csv(file = "../data/design_experiment_rpi.csv", data_frame_rpi)
+
