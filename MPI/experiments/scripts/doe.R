@@ -4,9 +4,9 @@ if (!require("DoE.wrapper")) install.packages("DoE.wrapper");
 
 library("DoE.wrapper")
 
-number_of_runs <- 2000
-min_image_size <- 15
-max_image_size <- 20
+number_of_runs <- 200
+min_image_size <- 12
+max_image_size <- 15
 max_block_size <- 10
 max_processors <- 6
 

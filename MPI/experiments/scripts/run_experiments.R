@@ -14,8 +14,11 @@ mandrill_size <- 512
 
 commands <- paste("mpirun -np", valid_experiments$processors, "./dithering_bw", "Image/mandrill.pgm",  valid_experiments$col_block_size, valid_experiments$row_block_size,(valid_experiments$image_size / mandrill_size) , sep = " ")
 
-head(commands)
+begin <- as.numeric(commandArgs(TRUE)[1])
 
-for (i in 1:10){#length(commands)) {
-    # system(commands[i])
+end <- as.numeric(commandArgs(TRUE)[2])
+
+
+for (i in begin:end){
+    system(commands[i])
 }
