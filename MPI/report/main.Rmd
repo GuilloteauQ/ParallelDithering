@@ -5,6 +5,7 @@ classoption: twocolumn
 header-includes:
     - \usepackage{graphicx}
     - \usepackage{tikz}
+    - \usetikzlibrary{decorations.pathreplacing,angles,quotes}
 output:
     pdf_document:
         keep_tex: true
@@ -52,6 +53,7 @@ $$
 $$
 
 \begin{figure}
+\label{fig:propagation}
 \center
 \begin{tikzpicture}
     \draw (0,0) grid (3,2);
@@ -114,7 +116,7 @@ for (y = 0; y < rows; y++) {
 }
 ```
 
-As we can see, this algorithm is *highly sequential*.
+As we can see, this algorithm is _highly sequential_.
 We have to start from the top left of the image and work ourselves to the right until we reach the end of the line.
 Then we start again from the next line.
 
@@ -184,6 +186,116 @@ As we saw in figure \ref{fig:ppe}, a process must be done processing pixel $n$ o
 
 ### Implemenation Details
 
+#### Data Structure
+
+TODO
+
+#### Distributing the lines to the processes
+
+As one process has non adjacent lines, we have to define our own ``MPI_Vector_Type`` to properly send the correct lines to each process.
+
+As we want process $P_{i}$ to have $\frac{n}{p}$ lines with $p - 1$ lines between each line and stating with the $i$th line.
+
+```{C}
+// Definition of the custom type
+MPI_Type_vector(h / world_size,
+                w, world_size * w,
+                MPI_INT16_T, &PixelLine);
+MPI_Type_commit(&PixelLine);
+```
+
+Unfortunatly, it is not possible to simply use the ``MPI_Scatter`` function to send the pixels to the processes.
+Indeed, it will start the next ``PixelLine`` at the end of the previous one, however, we want it to start at the same position that the previous one with an offset of ``w``.
+
+So we decided to simply call the ``MPI_Send`` function manually to scatter the lines among the processes.
+
+#### Processing a line
+
+Apart for the first line of the first process, every process has to receive the error from the above process to be able to process the pixels of its current line.
+
+```{C}
+MPI_Recv(&error_from_top, 1, MPI_INT16_T,
+    (my_rank + world_size - 1) % world_size,
+    0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+```
+
+Once the error from has been received, we need to update the value of the current pixel.
+
+```{C}
+local_pixels[i + w * line_index]
+        += error_from_top;
+```
+
+At this point, we can compute the new value for this pixel and its error to propagate.
+
+```{C}
+int16_t current_value =
+    local_pixels[i + w * line_index];
+int16_t new_value = (current_value < 127) ?
+                    0 : 255;
+local_pixels[i + w * line_index] = new_value;
+int16_t error = current_value - new_value;
+```
+
+#### Propagating the error to the process below
+
+As figure \ref{fig:propagation} shows, once its value updated, one pixel has to send its error to (at most) 3 pixels to the line below.
+However, in order for the first error of the line to be send to the process below, we need to wait for the second pixel to be done processing as we want to send the error only once.
+
+We decided to use a circular buffer of size 3 to manage this issue.
+
+This buffer will store the cumulated errors to send to the process below until they are ready to be send.
+We need a size of 3 because a pixel propagate its error to (at most) 3 pixels on the line below.
+
+\begin{figure}
+    \center
+    \begin{tikzpicture}
+        % Drawing the lines and buffers
+        \draw (0,0) grid (4,1);
+        \draw (0,2) grid (3,3);
+        \draw (0,4) grid (4,5);
+
+        % Drawing the lines
+        \draw [->, dashed] (0.5,4.5) -- (0.5,2.75);
+        \draw [->, dashed] (0.5,4.5) -- (1.25,2.75);
+        \draw [black] (0.5, 4.75) node {1};
+        \draw (0.5, 4.75) circle (0.15);
+
+        \draw [->, dashed] (1.5,4.5) -- (0.75,2.75);
+        \draw [->, dashed] (1.5,4.5) -- (1.5,2.75);
+        \draw [->, dashed] (1.5,4.5) -- (2.25,2.75);
+        \draw [black] (1.5, 4.75) node {2};
+        \draw (1.5, 4.75) circle (0.15);
+
+        \draw [->] (0.5,2.5) -- node {send} (0.5,0.5);
+        \draw [black] (-0.1, 1.47) node {3};
+        \draw (-0.1, 1.47) circle (0.15);
+
+        % Legend
+        \draw (-1, 4.5) node {line $i$};
+        \draw (-1, 2.5) node {Buffer};
+        \draw (-1, 0.5) node {line $i + 1$};
+
+       \draw[decoration={brace,mirror,raise=5pt},decorate](-1.7,5) -- node[left=6pt] {$P_{k}$} (-1.7,2);
+       \draw[decoration={brace,mirror,raise=5pt},decorate](-1.7,1) -- node[left=6pt] {$P_{k + 1}$} (-1.7,0);
+
+
+    \end{tikzpicture}
+
+\caption{Use of the cicular buffer}
+\label{fig:circular buffer}
+\end{figure}
+
+Figure \ref{fig:circular_buffer} resumes the mechanism used with the buffer.
+
+\begin{enumerate}
+    \item The first pixel of line $i$ is processed on $P_{k}$. We add the proportions of the error to the corresponding cells of the buffer.
+    \item The second pixel of line $i$ is processed on $P_{k}$. We add the propotions of the error to the corresponding cells of the buffer.
+    \item The first cell of the buffer is ready to be send to $P_{k+1}$ (no more depencies). It contains the cumulated error for the first pixel of line $i+1$.
+    \item Once send, we set the value of the sent cell back to 0.
+\end{enumerate}
+
+
 ### Performance Analysis
 \label{sec:alternate}
 
@@ -201,7 +313,7 @@ Therefore there are in total $2\times ( p - 1) + \frac{n^2}{p}$ steps.
 We thus have:
 
 \begin{equation}
-T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p} \right) \left( w + L + \frac{1}{B}\right)
+T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p} \right) \times \left( w + L + \frac{1}{B}\right)
 \end{equation}
 
 The sequential time is: $w\times n^2$.
@@ -256,7 +368,7 @@ Once the first line will be done by process $P_{0}$, process $P_{p-1}$ would hav
 
 We want the last process to have processed at least 2 blocks (so it can send the error of the first block to process $P_{0}$).
 
-Thus, 
+Thus,
 
 \begin{equation}
 \frac{w}{k} - 2\times (p - 1) \geq 2 \implies k \leq \frac{w}{2 \times p} = k_{hi}
@@ -278,7 +390,7 @@ T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p \times k} \right) \left( w \tim
 We compute next the speedup of this new version:
 
 $$
-\displaystyle S(n, p) = \frac{w \times n^2}{\left( 2\times ( p - 1) + \frac{n^2}{p\times k} \right) \left( w \times k + L + \frac{k}{B}\right)}
+\displaystyle S(n, p) = \frac{w \times n^2}{\left( 2\times ( p - 1) + \frac{n^2}{p\times k} \right) \times \left( w \times k + L + \frac{k}{B}\right)}
 $$
 
 The limit speedup is thus:
@@ -318,7 +430,7 @@ TODO IMAGE
 We pretty much have the same logic than in section \ref{sec:alternate}, with blocks instead of pixels.
 
 \begin{equation}
-T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p \times k \times r} \right) \left( w \times k \times r + L + \frac{k}{B}\right)
+T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p \times k \times r} \right) \times \left( w \times k \times r + L + \frac{k}{B}\right)
 \end{equation}
 
 We compute next the speedup of this new version:
