@@ -215,14 +215,14 @@ $$
 The limit speedup is thus:
 
 \begin{equation}
-\displaystyle \lim _{n \rightarrow \infty} S(n, p) = \frac{w \times p}{w + L + \frac{1}{B}}
+\displaystyle \lim_{n \rightarrow \infty} S(n, p) = \frac{w \times p}{w + L + \frac{1}{B}}
 \end{equation}
 
 The efficiency of this algorithm is:
 
 \begin{equation}
 \label{eq:eff1}
-\displaystyle Eff(n, p)  = \lim _{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w} + \frac{1}{B \times w}}
+\displaystyle Eff(n, p)  = \lim_{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w} + \frac{1}{B \times w}}
 \end{equation}
 
 The efficiency of this algorithm (equation \ref{eq:eff1}) is less than one.
@@ -239,6 +239,28 @@ We will then also send the errors per block.
 TODO IMAGE
 
 TODO Compute the min block size to be ok
+
+### Upper bound for $k$
+
+Let $w$ be the width of the image and $p$ be the number of processes.
+
+In order to not have any idle time by the processes, we would like the process $P_{p-1}$ to have at least finished processing its first 2 blocks when process $P_{0}$ is done processing its line.
+
+Otherwise, process $P_{0}$ would have to wait for process $P_{p-1}$ to send the error of the first block.
+
+Let $k_{hi}$ be the lower bound of $k$ such that there is no busy waiting by the processes.
+
+There are $\displaystyle \frac{w}{k}$ blocks to process on one line.
+
+Once the first line will be done by process $P_{0}$, process $P_{p-1}$ would have processed $\frac{w}{k} - 2\times (p - 1)$.
+
+We want the last process to have processed at least 2 blocks (so it can send the error of the first block to process $P_{0}$).
+
+Thus, 
+
+\begin{equation}
+\frac{w}{k} - 2\times (p - 1) \geq 2 \implies k \leq \frac{w}{2 \times p} = k_{hi}
+\end{equation}
 
 ### Implementation Details
 
@@ -262,14 +284,14 @@ $$
 The limit speedup is thus:
 
 \begin{equation}
-\displaystyle \lim _{n \rightarrow \infty} S(n, p) = \frac{w \times p \times k}{w \times k + L + \frac{k}{B}}
+\displaystyle \lim_{n \rightarrow \infty} S(n, p) = \frac{w \times p \times k}{w \times k + L + \frac{k}{B}}
 \end{equation}
 
 The efficiency of this algorithm is:
 
 \begin{equation}
 \label{eq:eff2}
-\displaystyle Eff(n, p)  = \lim _{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w \times k} + \frac{1}{B\times w}}
+\displaystyle Eff(n, p)  = \lim_{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w \times k} + \frac{1}{B\times w}}
 \end{equation}
 
 We see that we improve the efficiency of the algorithm by limiting the use of the network and reducing the global cost of the latency.
@@ -308,14 +330,14 @@ $$
 The limit speedup is thus:
 
 \begin{equation}
-\displaystyle \lim _{n \rightarrow \infty} S(n, p) = \frac{w \times p \times k \times r}{w \times k \times r + L + \frac{k}{B}}
+\displaystyle \lim_{n \rightarrow \infty} S(n, p) = \frac{w \times p \times k \times r}{w \times k \times r + L + \frac{k}{B}}
 \end{equation}
 
 The efficiency of this algorithm is:
 
 \begin{equation}
 \label{eq:eff3}
-\displaystyle Eff(n, p)  = \lim _{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w \times k \times r} + \frac{1}{B\times w \times r}}
+\displaystyle Eff(n, p)  = \lim_{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w \times k \times r} + \frac{1}{B\times w \times r}}
 \end{equation}
 
 Once again, we manage to improve the efficiency of the algorithm by limiting the number of messages send.
