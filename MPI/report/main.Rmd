@@ -423,6 +423,37 @@ The remaining pixels will be processed sequentially.
 
 TODO IMAGE
 
+### Upper bound for $r$
+
+In order to process the $i^{th}$ block of pixel of the last line of the block of line, we need to process the $(i + 1)^{th}$ block of the previous line of the block.
+
+We can then compute the number of block to process first to be able to process the $i^{th}$ block of the last line:
+
+\begin{equation}
+\displaystyle \sum_{j=0}^{r-1} i + j = r\times i + \frac{(r-1)r}{2}
+\end{equation}
+
+So, to send the first error to the process below, we need to process the first 2 blocks of the last line (i.e. $i = 2$).
+Thus, we need to process the total of $\frac{r(r + 3)}{2}$ blocks of pixels.
+
+We don't want to have processes being busy waiting between when they finish processing their previous block of lines and when they start their next block of lines.
+
+The time to send the first error to the first process is: $p\times \frac{r(r + 3)}{2}w$
+
+The time to process an entire block of lines is: $N \times r \times w$
+
+We want the error to be send before the first process is done processing its block of lines:
+
+\begin{equation}
+p\frac{r(r + 3)}{2}w \leq N r w
+\end{equation}
+
+So the upper bound for $r$ to eliminate busy waiting is:
+
+\begin{equation}
+r \leq \frac{2N}{p} - 3 = r_{hi}
+\end{equation}
+
 ### Implementation Details
 
 ### Performance Anlysis
