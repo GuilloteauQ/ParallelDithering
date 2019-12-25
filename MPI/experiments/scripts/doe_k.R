@@ -4,10 +4,10 @@ pow2 <- function(n) {
     2 ^ n
 }
 number_of_runs <- 200
-image_size <- pow2(12)
+image_size <- pow2(13)
 max_image_size <- 15
 max_block_size <- 10
-max_processors <- 32
+max_processors <- 16
 # 
 # data_frame <- lhs.design(
 #                          type = "maximin",
