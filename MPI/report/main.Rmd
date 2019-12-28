@@ -520,7 +520,7 @@ ggplot(data = df, aes(x = r, y = mean)) +
     theme_bw() +
     geom_errorbar(aes(ymin = confidence_inf, ymax = confidence_sup), width = 0.2) +
     geom_point() +
-    geom_vline(xintercept = 1021, color = "blue") +
+    geom_vline(xintercept = 7.2, color = "blue") +
     scale_x_continuous(trans = 'log2', breaks = df$r) +
     xlab("block size") +
     ylab("Speedup") +
