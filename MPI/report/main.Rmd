@@ -488,21 +488,40 @@ Thus, we need to process the total of $\frac{r(r + 3)}{2}$ blocks of pixels.
 
 We don't want to have processes being busy waiting between when they finish processing their previous block of lines and when they start their next block of lines.
 
-The time to send the first error to the first process is: $p\times \frac{r(r + 3)}{2}w$
+For processes other than the first one, there are actually unavoidable waiting times.
+Indeed, for example, to receive the second error, a process has to wait for the process above to send it.
+However, there is not enough work to do yet to be busy until the error is sent.
 
-The time to process an entire block of lines is: $N \times r \times w$
 
-We want the error to be send before the first process is done processing its block of lines:
-
-\begin{equation}
-p\frac{r(r + 3)}{2}w \leq N r w
-\end{equation}
-
-So the upper bound for $r$ to eliminate busy waiting is:
+The waiting time for such a process is:
 
 \begin{equation}
-r \leq \frac{2N}{p} - 3 = r_{hi}
+\displaystyle \sum_{i = 1}^{r} (r - i)
 \end{equation}
+
+Thus, for processes that are not the first process, the time to send the first error is:
+\begin{equation}
+\displaystyle \frac{r(r + 3)}{2} + \sum_{i = 1}^{r} (r - i) = r(r + 1)
+\end{equation}
+
+Thus, the total time to get the first error in the second block of line of the first process is:
+
+\begin{equation}
+\frac{r(r+3)}{2} + (p - 1)r(r+1) = r\left(r\left(p - \frac{1}{2}\right) + \left(p + \frac{1}{2}\right)\right)
+\end{equation}
+
+We want the first process to finish the first block of lines after the first error for its second block of lines is sent:
+
+\begin{equation}
+r\left(r\left(p - \frac{1}{2}\right) + \left(p + \frac{1}{2}\right)\right) \leq \frac{W}{k}r
+\end{equation}
+
+Thus, the upper bound for $r$ is:
+
+\begin{equation}\label{eq:up_r}
+r \leq \frac{\frac{W}{k} - \left(p + \frac{1}{2}\right)}{p - \frac{1}{2}} = r_{hi}
+\end{equation}
+
 
 ```{r, echo=FALSE, fig.cap="\\label{fig:opti_r}Speedup depending on the block size ($r$)"}
 df <- read.csv("../experiments/data/output_upper_bound_r_new.csv", header = TRUE, sep = " ")
@@ -528,16 +547,22 @@ df_k$confidence_sup <- df_k$mean + 2 * df_k$sd
 ggplot() +
     theme_bw() +
     geom_point(data = df, aes(x = r, y = mean), color = "red") +
-    geom_errorbar(data = df, aes(x = r, y = mean, ymin = confidence_inf, ymax = confidence_sup), width = 0.2) +
+    geom_errorbar(data = df, aes(x = r, ymin = confidence_inf, ymax = confidence_sup), width = 0.2) +
     geom_vline(xintercept = rmax, color = "blue") +
     geom_point(data = df_k, aes(x = r, y = mean), color = "green") +
-    geom_errorbar(data = df_k, aes(x = r, y = mean, ymin = confidence_inf, ymax = confidence_sup), width = 0.2) +
+    geom_errorbar(data = df_k, aes(x = r, ymin = confidence_inf, ymax = confidence_sup), width = 0.2) +
     geom_vline(xintercept = rmax_k, color = "blue") +
     scale_x_continuous(trans = 'log2', breaks = df$r) +
     xlab("block size") +
     ylab("Speedup") +
     ggtitle("Speedup depending on the block size")
 ```
+
+
+#### Remarks
+
+If we plug $k = k_{hi}$ in the value of the upper bound for $r$, we get $r \leq 1$.
+Which makes sense as this is an optimal value of $k$ for blocks of one line.
 
 ### Implementation Details
 
@@ -570,6 +595,82 @@ The efficiency of this algorithm is:
 
 Once again, we manage to improve the efficiency of the algorithm by limiting the number of messages send.
 However, the efficiency if always less than 1.
+
+# Optimal block sizes
+
+Equation \ref{eq:up_r}, we found a relation linking the parameters of our problem: $r$ and $k$.
+
+We can thus easily get the optimal value of one given the other.
+The question now is to get the best couple $(r, k)$.
+
+From \ref{sec:r}, we have:
+
+\begin{equation*}
+T = \frac{HW}{rk}\left(L + \frac{k}{B} + wk\right) + \frac{(H - r)(r - 1)}{2}w
+\end{equation*}
+
+We can plug the expression of $k$ found in equation \ref{eq:up_r} and derive with respect to $r$:
+
+\begin{equation}
+\frac{dT}{dr} = \frac{-1}{r^2}\left(HL\left(p + \frac{1}{2}\right) + HW\left(\frac{1}{B} + w\right)\right) + \frac{w(H + 1)}{2} - wr
+\end{equation}
+
+
+As we do not know the parameters of the network, let us approximate some parts of the equation:
+
+\begin{itemize}
+    \item $p + \frac{1}{2} \simeq p$
+    \item $H + 1 \simeq H$
+    \item $\frac{1}{B} + w \simeq w$
+\end{itemize}
+
+At this point we have:
+
+\begin{equation}
+\frac{dT}{dr} = \frac{-1}{r^2}\left(HLp + HWw\right) + \frac{wH}{2} - wr
+\end{equation}
+
+We can also assume that $HLp + HWw \simeq HWw$.
+
+We would like to solve $\frac{dT}{dr} = 0$ to find the value of $r$ minimizing $T$, and then compute the optimal value of $k$.
+
+The equation to solve is thus:
+
+\begin{equation}
+r^3 - r^2\frac{H}{2} + HW = 0
+\end{equation}
+
+
+Hopefully, we can solve this:
+
+```{r}
+H <- 2^24
+W <- 2^24
+p <- 32
+
+roots <- polyroot(z = c(H*W, 0, -H/2, 1))
+
+r <- roots[1] # The real root
+r
+k <- W / (r * (p - 0.5) + (p + 0.5))
+k
+```
+
+We have to take the $r$ the closest to this optimal value such that $W \equiv 0~ (mod~ r\times p)$.
+In this case $r = 32$.
+
+```{r}
+W <- 512
+p <- 4
+
+r <- 32
+k <- W / (r * (p - 0.5) + (p + 0.5))
+k
+```
+
+
+So, in this example, we would take $r = 32$ and $k = 4$
+
 
 # Performances
 
