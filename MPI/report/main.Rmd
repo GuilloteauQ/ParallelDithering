@@ -549,10 +549,11 @@ ggplot() +
     geom_point(data = df, aes(x = r, y = mean), color = "red") +
     geom_errorbar(data = df, aes(x = r, ymin = confidence_inf, ymax = confidence_sup), width = 0.2) +
     geom_vline(xintercept = rmax, color = "blue") +
-    geom_point(data = df_k, aes(x = r, y = mean), color = "green") +
-    geom_errorbar(data = df_k, aes(x = r, ymin = confidence_inf, ymax = confidence_sup), width = 0.2) +
-    geom_vline(xintercept = rmax_k, color = "blue") +
+    # geom_point(data = df_k, aes(x = r, y = mean), color = "green") +
+    # geom_errorbar(data = df_k, aes(x = r, ymin = confidence_inf, ymax = confidence_sup), width = 0.2) +
+    # geom_vline(xintercept = rmax_k, color = "blue") +
     scale_x_continuous(trans = 'log2', breaks = df$r) +
+    scale_y_continuous(limits = c(0, 3)) +
     xlab("block size") +
     ylab("Speedup") +
     ggtitle("Speedup depending on the block size")
@@ -598,6 +599,8 @@ However, the efficiency if always less than 1.
 
 # Optimal block sizes
 
+## 
+
 Equation \ref{eq:up_r}, we found a relation linking the parameters of our problem: $r$ and $k$.
 
 We can thus easily get the optimal value of one given the other.
@@ -619,9 +622,9 @@ We can plug the expression of $k$ found in equation \ref{eq:up_r} and derive wit
 As we do not know the parameters of the network, let us approximate some parts of the equation:
 
 \begin{itemize}
-    \item $p + \frac{1}{2} \simeq p$
-    \item $H + 1 \simeq H$
-    \item $\frac{1}{B} + w \simeq w$
+    \item $p + \frac{1}{2} \simeq p$ ($p$ is large: highly distributed)
+    \item $H + 1 \simeq H$ (The image is "big")
+    \item $\frac{1}{B} + w \simeq w$ (The network is not the bottleneck of the algorithm)
 \end{itemize}
 
 At this point we have:
@@ -630,7 +633,7 @@ At this point we have:
 \frac{dT}{dr} = \frac{-1}{r^2}\left(HLp + HWw\right) + \frac{wH}{2} - wr
 \end{equation}
 
-We can also assume that $HLp + HWw \simeq HWw$.
+We can also assume that $Lp + Ww \simeq Ww$ (The network is not the bottleneck of the algorithm).
 
 We would like to solve $\frac{dT}{dr} = 0$ to find the value of $r$ minimizing $T$, and then compute the optimal value of $k$.
 
@@ -671,8 +674,56 @@ k
 
 So, in this example, we would take $r = 32$ and $k = 4$
 
+## Experiment
+
+We can thus make an experiment in order to check if the theorical optimal value for $r$ is the one we found.
+
+In this experiement, we fixed the size of the image and the number of processors.
+We generated points for some possible values of $r$ and computed the optimal value of $k$ associated with this value of $r$ (see equation \ref{eq:up_r}).
+We added to the dataset the optimal configuration.
+We then mesured the speedup for each configuration and plotted the results in figure \ref{fig:opti}.
+
+```{r, echo=FALSE, fig.cap="\\label{fig:opti}Speedup depending on the block size ($r$)"}
+df <- read.csv("../experiments/data/output_r_opti.csv", header = TRUE, sep = " ")
+
+df$speedup <- df$seq_time / df$par_time
+
+opti_r <- function(h, w, p) {
+    roots <- polyroot(z = c(h*w, 0, -h/2, 1))
+    roots[1]
+}
+r_opti <- opti_r(df$h[1], df$w[1], df$p[1])
+
+df <- df %>% group_by(r) %>% summarise(mean = mean(speedup), sd = sd(speedup))
+
+df$confidence_inf <- df$mean - 2 * df$sd
+df$confidence_sup <- df$mean + 2 * df$sd
+
+ggplot() +
+    theme_bw() +
+    geom_point(data = df, aes(x = r, y = mean), color = "red") +
+    geom_errorbar(data = df, aes(x = r, ymin = confidence_inf, ymax = confidence_sup), width = 0.2) +
+    geom_vline(xintercept = as.integer(r_opti), color = "blue") +
+    scale_x_continuous(trans = 'log2', breaks = df$r) +
+    scale_y_continuous(limits = c(0, 4)) +
+    xlab("block size") +
+    ylab("Speedup") +
+    ggtitle("Speedup depending on the block size")
+```
+
+We can see that the theorical optimal value of $r$ (in blue on figure \ref{fig:opti}) is not exactly the experiemental optimal value (around $r = 64$).
+
+This could be due to how we approximated the derivative of $T$.
+However, after $r = 64$, there seems to be a "plateau" where the speedup does not variate much.
+Thus by keeping the therorical optimal $r$, we could still get some high performances.
 
 # Performances
+
+TODO:
+
+* Fix the image size and make the number of processes grow
+
+
 
 # Conclusion
 
