@@ -14,6 +14,7 @@ output:
     html_document:
         keep_tex: true
         number_sections: true
+abstract: "From palette reduction in GIF images to printing, dithering techniques are widely used. With the incresing size of the images today, due to better photographic hardware, we can wonder if we can gain in performance by processing an image in parallel. In this paper, we will implement a MPI algorithm to apply the Floyd-Steinberg dithering in parallel. We will then focus on performance and look for optimal values of parameters."
 ---
 
 ```{r setup, include=FALSE}
@@ -26,41 +27,41 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Dithering
 
-Dithering is the action to convert a grey scale image into an image composed only of black and white pixels.
+The action of dithering is used in image processing to reduce the number of color used in an image.
+One example is for printers that have only two values: either with ink or without.
 
+The error diffusion in the dithering process consists to spread to neighbouring pixels the quantification error due to the restriction of a pixel to a reduced palette.
+This technique reduces phenomenons such as banding (i.e. inaccurate color presentation) but introduces some noise.
+
+In this paper, we will focus on the palette reduction of a grey scale image (256 values) to a black and white image (2 values: 0 and 255).
+
+Figure \ref{fig:grey_scale} represents a grey scale image, and figure \ref{fig:dither} is its dither image.
 
 \begin{figure}[h]
     \center
     \includegraphics[width=170px]{Images/charlie.png}
     \caption{Grey Scale Image}
+    \label{fig:grey_scale}
 \end{figure}
 
 \begin{figure}[h]
     \center
     \includegraphics[width=170px]{Images/charlie_d.png}
     \caption{Dithered Image}
+    \label{fig:dither}
 \end{figure}
+
+We can see on figure \ref{fig:dither} the dots composing the image.
+Even with only two pixel values, the contrast of the different parts of of the image is repescted.
 
 ## Floyd-Steinberg Dithering
 
 There are many different possible ditherings.
 They all use the same principles, only some numerical constants change.
 In this paper, we will only focus on the __Floyd-Steinberg Dithering__.
-It uses error diffusion.
-
-The error diffusion matrix is the following:
-
-$$
-\displaystyle \left[ \begin{matrix}
-    0 & 0 & 0 \\
-    0 & 0 & \frac{7}{16} \\
-    \frac{3}{16} & \frac{5}{16} & \frac{1}{16} \\
-    \end{matrix}
-    \right]
-$$
+It uses the error diffusion pattern depicted in figure \ref{fig:propagation}.
 
 \begin{figure}
-\label{fig:propagation}
 \center
 \begin{tikzpicture}
     \draw (0,0) grid (3,2);
@@ -74,7 +75,19 @@ $$
     \draw (0.5, 0.5) node {$\frac{3}{16}$};
 \end{tikzpicture}
 \caption{Error Diffusion for the Floyd-Steinberg Dithering}
+\label{fig:propagation}
 \end{figure}
+
+The dithering works as follow:
+
+1. We assign a new value to the current pixel
+
+2. We compute the error of this pixel as the difference between the new value and the old value
+
+3. [Error Diffusion] We add a fraction of this error to the neighbouring pixels according to figure \ref{fig:propagation}
+
+
+For example, if the error for the current pixel is 42, we will add $\frac{7}{16}\times 42$ to the value of the pixels on its right.
 
 Figure \ref{fig:local_deps} shows another way to look at it, by considering the dependencies for a single pixel.
 
@@ -128,6 +141,39 @@ We have to start from the top left of the image and work ourselves to the right 
 Then we start again from the next line.
 
 
+# Experimental Setup
+
+Let us present the experimental setup used for every experiment presented on this paper.
+
+## Experimental Design
+
+All the experiments presented in this paper have 2 associated R scripts:
+
+\begin{itemize}
+    \item A script generating the design of the experiment.
+    \item A script taking the design of the experiment and running it.
+\end{itemize}
+
+The first one will generate a CSV file composed of all the configurations to benchmark during the experiment.
+The second will read the first one and then run the correct mpi commands to run the experiment.
+
+## Hardware
+
+For all the experiements, we used the Grid5000 __dahu__ cluster located in Grenoble.
+
+The hardware on this cluster is:
+
+* CPU: 2 x Intel Xeon Gold 6130
+
+* Cores: 16 cores/CPU
+
+* Memory: 192 GiB
+
+* Storage: 240 GB SSD + 480 GB SSD + 4.0 TB HDD
+
+* Network: 10 Gbps + 100 Gbps Omni-Path
+
+
 # Parallel Dithering
 
 The main idea of the paralle dithering, is that the progression looks more like a triangle than a rectangle:
@@ -171,18 +217,14 @@ The first idea is to alternate processes and giving them one line at the time to
     \center
     \begin{tikzpicture}
         \draw (0,0) grid (5,4);
-        \draw [blue,thick] (0,3.02) rectangle (5, 3.98);
-        \draw [red,thick] (0,2.02) rectangle (5, 2.98);
-        \draw [blue,thick] (0,1.02) rectangle (5, 1.98);
-        \draw [red,thick] (0,0.02) rectangle (5, 0.98);
+        \draw[decoration={brace,mirror,raise=0pt},decorate](5.2,0) -- node[right=3pt] {$P_1$} (5.2, 1);
+        \draw[decoration={brace,mirror,raise=0pt},decorate](5.2,2) -- node[right=3pt] {$P_1$} (5.2, 3);
 
-        \draw [blue] (2.5, 1.5) node {Process 0};
-        \draw [blue] (2.5, 3.5) node {Process 0};
-        \draw [red] (2.5, 0.5) node {Process 1};
-        \draw [red] (2.5, 2.5) node {Process 1};
+        \draw[decoration={brace,raise=0pt},decorate](-0.2,1) -- node[left=3pt] {$P_0$} (-0.2, 2);
+        \draw[decoration={brace,raise=0pt},decorate](-0.2,3) -- node[left=3pt] {$P_0$} (-0.2, 4);
     \end{tikzpicture}
 
-\caption{Data Distribution per Process}
+\caption{Data Distribution per Process (with 2 processes)}
 \label{fig:alternate_processes}
 \end{figure}
 
@@ -193,9 +235,14 @@ As we saw in figure \ref{fig:ppe}, a process must be done processing pixel $n$ o
 
 ### Implemenation Details
 
-#### Data Structure
+#### Representing one Pixel
 
-TODO
+On decision made to simplify the code was to encode pixels on a ``int16_t`` integer.
+
+Of course, pixels in a grey scale image only go from 0 to 255.
+Only requiring 8 bits.
+
+However, as we will need to add or substract error values to the value of a pixel, being able to have negative values was crucial.
 
 #### Distributing the lines to the processes
 
@@ -221,6 +268,7 @@ So we decided to simply call the ``MPI_Send`` function manually to scatter the l
 Apart for the first line of the first process, every process has to receive the error from the above process to be able to process the pixels of its current line.
 
 ```{C}
+// Call to recv the error from above
 MPI_Recv(&error_from_top, 1, MPI_INT16_T,
     (my_rank + world_size - 1) % world_size,
     0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -229,6 +277,7 @@ MPI_Recv(&error_from_top, 1, MPI_INT16_T,
 Once the error from has been received, we need to update the value of the current pixel.
 
 ```{C}
+// Updating the local value
 local_pixels[i + w * line_index]
         += error_from_top;
 ```
@@ -236,6 +285,7 @@ local_pixels[i + w * line_index]
 At this point, we can compute the new value for this pixel and its error to propagate.
 
 ```{C}
+// Processing the current pixel
 int16_t current_value =
     local_pixels[i + w * line_index];
 int16_t new_value = (current_value < 127) ?
@@ -296,9 +346,9 @@ We need a size of 3 because a pixel propagate its error to (at most) 3 pixels on
 Figure \ref{fig:circular_buffer} resumes the mechanism used with the buffer.
 
 \begin{enumerate}
-    \item The first pixel of line $i$ is processed on $P_{k}$. We add the proportions of the error to the corresponding cells of the buffer.
-    \item The second pixel of line $i$ is processed on $P_{k}$. We add the propotions of the error to the corresponding cells of the buffer.
-    \item The first cell of the buffer is ready to be send to $P_{k+1}$ (no more depencies). It contains the cumulated error for the first pixel of line $i+1$.
+    \item The first pixel of line $i$ is processed on process $P_{k}$. We add the proportions of the error to the corresponding cells of the buffer.
+    \item The second pixel of line $i$ is processed on process $P_{k}$. We add the propotions of the error to the corresponding cells of the buffer.
+    \item The first cell of the buffer is ready to be send to process $P_{k+1}$ (no more depencies). It contains the cumulated error for the first pixel of line $i+1$.
     \item Once send, we set the value of the sent cell back to 0.
 \end{enumerate}
 
@@ -307,34 +357,32 @@ Figure \ref{fig:circular_buffer} resumes the mechanism used with the buffer.
 \label{sec:alternate}
 
 Let $p$ be the number of processors.
-Let us consider a square image of size $n$.
+Let us consider an image of size $H\times W$.
 Let $L$ be the latency of the network and $B$ its bandwidth.
 Let $w$ be the processing time of a pixel.
 
-It takes $2 \times ( p - 1)$ steps before processor $P_{p - 1}$ can start processing the first pixel of its first line.
+Each processor has $\frac{H\times W}{p}$ pixels to process.
 
-Each processor has $\frac{n^2}{p}$ pixels.
-
-Therefore there are in total $2\times ( p - 1) + \frac{n^2}{p}$ steps.
+The global time spent "busy waiting" is $2(H-1)w$ and we have to wait for the last process to finish.
 
 We thus have:
 
 \begin{equation}
-T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p} \right) \times \left( w + L + \frac{1}{B}\right)
+T(n, p) = \frac{HW}{p} \left( w + L + \frac{1}{B}\right) + 2(H-1)w
 \end{equation}
 
-The sequential time is: $w\times n^2$.
+The sequential time is: $w\times H \times W$.
 
 We can thus compute the speedup:
 
 $$
-\displaystyle S(n, p) = \frac{w \times n^2}{\left( 2\times ( p - 1) + \frac{n^2}{p} \right) \left( w + L + \frac{1}{B}\right)}
+\displaystyle S(n, p) = \frac{wHW}{\frac{HW}{p} \left( w + L + \frac{1}{B}\right) + 2(H-1)w}
 $$
 
 The limit speedup is thus:
 
 \begin{equation}
-\displaystyle \lim_{n \rightarrow \infty} S(n, p) = \frac{w \times p}{w + L + \frac{1}{B}}
+\displaystyle \lim_{n \rightarrow \infty} S(n, p) = \frac{1}{\frac{1}{p} + \frac{L}{wp} + \frac{1}{wpB}}
 \end{equation}
 
 The efficiency of this algorithm is:
@@ -354,14 +402,49 @@ It thus means that it is not very efficient.
 Sending the error every time a process process a pixel introduce too much loss due to the latency.
 We will try to reduce the granularity of the algorithm by grouping pixels per block.
 We will then also send the errors per block.
+We call $k$ the number of pixels in a block.
+Figure \ref{fig:blocks} summarise the execution of a line of pixels using blocks.
 
-TODO IMAGE
+\begin{figure}
+    \center
+    \begin{tikzpicture}
+        \draw [black] (-1, 0.5) node {Step 1};
+        \draw [gray] (0,0) grid (6,1);
+        \draw [black,thick,dashed] (0,-0.2) rectangle (2, 1.2);
 
-TODO Compute the min block size to be ok
+        \draw [black] (-1, -1.5) node {Step 2};
+        \draw [gray] (0,-2) grid (6,-1);
+        \draw [black,thick,dashed] (2,-2.2) rectangle (4, -0.8);
+
+        \draw[decoration={brace,raise=0pt},decorate](0,1.3) -- (2, 1.3);
+        \draw [black] (1, 1.7) node {processing};
+
+        \draw[decoration={brace,raise=0pt},decorate](2,1.3) -- (6, 1.3);
+        \draw [black] (4, 1.7) node {to be processed};
+
+
+
+        \draw[decoration={brace,mirror,raise=0pt},decorate](0,-2.3) -- (2, -2.3);
+        \draw [black] (1, -2.7) node {processed};
+
+        \draw[decoration={brace,mirror,raise=0pt},decorate](2,-2.3) -- (4, -2.3);
+        \draw [black] (3, -2.7) node {processing};
+
+        \draw[decoration={brace,mirror,raise=0pt},decorate](4,-2.3) -- (6, -2.3);
+        \draw [black] (5, -3) node {to be processed};
+
+        \draw [black, ->] (1, -0.5) -- (3, -0.5);
+    \end{tikzpicture}
+
+\caption{Execution per block with $k = 2$}
+\label{fig:blocks}
+\end{figure}
 
 ### Upper bound for $k$
 
-Let $w$ be the width of the image and $p$ be the number of processes.
+#### Theoretical Value
+
+Let $W$ be the width of the image and $p$ be the number of processes.
 
 In order to not have any idle time by the processes, we would like the process $P_{p-1}$ to have at least finished processing its first 2 blocks when process $P_{0}$ is done processing its line.
 
@@ -369,18 +452,19 @@ Otherwise, process $P_{0}$ would have to wait for process $P_{p-1}$ to send the 
 
 Let $k_{hi}$ be the lower bound of $k$ such that there is no busy waiting by the processes.
 
-There are $\displaystyle \frac{w}{k}$ blocks to process on one line.
+There are $\displaystyle \frac{W}{k}$ blocks to process on one line.
 
-Once the first line will be done by process $P_{0}$, process $P_{p-1}$ would have processed $\frac{w}{k} - 2\times (p - 1)$.
+Once the first line will be done by process $P_{0}$, process $P_{p-1}$ would have processed $\frac{W}{k} - 2\times (p - 1)$.
 
 We want the last process to have processed at least 2 blocks (so it can send the error of the first block to process $P_{0}$).
 
 Thus,
 
 \begin{equation}
-\frac{w}{k} - 2\times (p - 1) \geq 2 \implies k \leq \frac{w}{2 \times p} = k_{hi}
+\frac{W}{k} - 2\times (p - 1) \geq 2 \implies k \leq \frac{W}{2 \times p} = k_{hi}
 \end{equation}
 
+#### Experiment
 
 We took an example with an image of width 8192 pixels on 16 processors.
 We doubled the block size starting from 2 pixels up to the total width of the image.
@@ -388,7 +472,7 @@ We doubled the block size starting from 2 pixels up to the total width of the im
 We can compute the upper bound for $k$:
 
 \begin{equation}
-k_{hi} = \frac{w}{2p} = \frac{8192}{2 \times 16} = 256
+k_{hi} = \frac{W}{2p} = \frac{8192}{2 \times 16} = 256
 \end{equation}
 
 ```{r, echo=FALSE, fig.cap="\\label{fig:opti_k}Speedup depending on the block size ($k$)"}
@@ -412,6 +496,7 @@ ggplot(data = df, aes(x = k, y = mean)) +
     geom_point() +
     geom_vline(xintercept = 256, color = "blue") +
     scale_x_continuous(trans = 'log2', breaks = df$k, labels = labels) +
+    scale_y_continuous(limits = c(0, 2)) +
     xlab("block size") +
     ylab("Speedup") +
     ggtitle("Speedup depending on the block size")
@@ -419,12 +504,10 @@ ggplot(data = df, aes(x = k, y = mean)) +
 
 In figure \ref{fig:opti_k} we show that the speedup is indeed maximal for $k = k_{hi}$.
 
-For the remaining of the experiments of this paper, we will take $k = k_{hi}$.
+#### Remarks
 
 We can also see a dip in performance for $k = 16$.
 We suspect that it must be linked to MPI having different ways to send the data depending on the size to send compared to a threshold.
-
-### Implementation Details
 
 ### Performance Analysis
 
@@ -434,26 +517,26 @@ We note $k$ the size of a block.
 So a block contains $k$ pixels.
 
 \begin{equation}
-T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p \times k} \right) \left( w \times k + L + \frac{k}{B}\right)
+T(n, p) = \frac{n^2}{p \times k} \left( w \times k + L + \frac{k}{B}\right) + 2k(H - 1)w
 \end{equation}
 
 We compute next the speedup of this new version:
 
 $$
-\displaystyle S(n, p) = \frac{w \times n^2}{\left( 2\times ( p - 1) + \frac{n^2}{p\times k} \right) \times \left( w \times k + L + \frac{k}{B}\right)}
+\displaystyle S(n, p) = \frac{wHW}{\frac{n^2}{p\times k} \left( w \times k + L + \frac{k}{B}\right) + 2k(H-1)w}
 $$
 
 The limit speedup is thus:
 
 \begin{equation}
-\displaystyle \lim_{n \rightarrow \infty} S(n, p) = \frac{w \times p \times k}{w \times k + L + \frac{k}{B}}
+\displaystyle \lim_{n \rightarrow \infty} S(n, p) = \frac{1}{\frac{1}{p} + \frac{L}{wpk} +\frac{1}{wpB}}
 \end{equation}
 
 The efficiency of this algorithm is:
 
 \begin{equation}
 \label{eq:eff2}
-\displaystyle Eff(n, p)  = \lim_{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w \times k} + \frac{1}{B\times w}}
+\displaystyle Eff(n, p)  = \lim_{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{wk} + \frac{1}{Bw}}
 \end{equation}
 
 We see that we improve the efficiency of the algorithm by limiting the use of the network and reducing the global cost of the latency.
@@ -466,14 +549,50 @@ In order to reduce the impact of the bandwith, we must send less messages throug
 In the previous section, we increased the size of the messages by sending pixels per block.
 In this section, we will create blocks of lines.
 Each process will have several blocks of lines.
-Each block of line will contain $r$ lines of pixels.
+Each block of line will contain $r$ __consecutive__ lines of pixels.
 Only the top and bottom lines of the block will require communications.
 The remaining pixels will be processed sequentially.
 
+We cannot however afford to process the pixels in a block of lines line by line.
+Indeed, this would result in too much time "busy waiting" for the processes.
+We thus decided to process the pixels in the block of lines in a zig-zag (or serpentine) way, as depicted in figure \ref{fig:zigzag}.
 
-TODO IMAGE
+
+\begin{figure}
+    \center
+    \begin{tikzpicture}
+        \draw [gray] (0,0) grid (6,3);
+        \draw[decoration={brace,raise=0pt},decorate](-0.2,0) -- node[left=3pt] {$r$} (-0.2, 3);
+        \draw [->] (0.5,2.5) -- (1.5, 2.5) -- (0.5,1.5) -- (2.5,2.5) -- (1.5,1.5) -- (0.5,0.5) -- (3.5,2.5) -- (2.5,1.5) -- (1.5,0.5);
+
+        \draw [gray, dashed, ->] (0.5, 3.7) -- (0.5, 3.2);
+        \draw (0.5, 4) node {recv};
+
+        \draw [gray, dashed, ->] (1.5, 3.7) -- (1.5, 3.2);
+        \draw (1.5, 4) node {recv};
+
+        \draw [gray, dashed, ->] (2.5, 3.7) -- (2.5, 3.2);
+        \draw (2.5, 4) node {recv};
+
+        \draw [gray, dashed, ->] (3.5, 3.7) -- (3.5, 3.2);
+        \draw (3.5, 4) node {recv};
+
+
+        \draw [gray, dashed, ->] (0.5, -0.5) -- (0.5, -1);
+        \draw (0.5, -0.2) node {send};
+
+        \draw [gray, dashed, ->] (1.5, -0.5) -- (1.5, -1);
+        \draw (1.5, -0.2) node {send};
+
+    \end{tikzpicture}
+
+\caption{Zig-Zag processing on a block of $r = 3$ lines}
+\label{fig:zigzag}
+\end{figure}
 
 ### Upper bound for $r$
+
+#### Theoretical Value
 
 In order to process the $i^{th}$ block of pixel of the last line of the block of line, we need to process the $(i + 1)^{th}$ block of the previous line of the block.
 
@@ -522,6 +641,8 @@ Thus, the upper bound for $r$ is:
 r \leq \frac{\frac{W}{k} - \left(p + \frac{1}{2}\right)}{p - \frac{1}{2}} = r_{hi}
 \end{equation}
 
+#### Experiment
+
 
 ```{r, echo=FALSE, fig.cap="\\label{fig:opti_r}Speedup depending on the block size ($r$)"}
 df <- read.csv("../experiments/data/output_upper_bound_r_new.csv", header = TRUE, sep = " ")
@@ -565,41 +686,38 @@ ggplot() +
 If we plug $k = k_{hi}$ in the value of the upper bound for $r$, we get $r \leq 1$.
 Which makes sense as this is an optimal value of $k$ for blocks of one line.
 
-### Implementation Details
-
 ### Performance Anlysis
 
 We pretty much have the same logic than in section \ref{sec:alternate}, with blocks instead of pixels.
 
 \begin{equation}
-T(n, p) = \left( 2\times ( p - 1) + \frac{n^2}{p \times k \times r} \right) \times \left( w \times k \times r + L + \frac{k}{B}\right)
+T(n, p) = \frac{HW}{krp} \left( wk + L + \frac{k}{B}\right) + wk\frac{(H-r)(r-1)}{2}
 \end{equation}
 
 We compute next the speedup of this new version:
 
 $$
-\displaystyle S(n, p) = \frac{w \times n^2}{\left( 2\times ( p - 1) + \frac{n^2}{p\times k \times r} \right) \left( w \times k \times r + L + \frac{k}{B}\right)}
+\displaystyle S(n, p) = \frac{wHW}{\frac{HW}{krp} \left( wk + L + \frac{k}{B}\right) + wk\frac{(H-r)(r-1)}{2}}
 $$
 
 The limit speedup is thus:
 
 \begin{equation}
-\displaystyle \lim_{n \rightarrow \infty} S(n, p) = \frac{w \times p \times k \times r}{w \times k \times r + L + \frac{k}{B}}
+\displaystyle \lim_{n \rightarrow \infty} S(n, p) = \frac{1}{\frac{1}{pr} + \frac{L}{pkrw} + \frac{1}{pwrB}}
 \end{equation}
 
 The efficiency of this algorithm is:
 
 \begin{equation}
-\label{eq:eff3}
-\displaystyle Eff(n, p)  = \lim_{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{1 + \frac{L}{w \times k \times r} + \frac{1}{B\times w \times r}}
+\label{eq:eff2}
+\displaystyle Eff(n, p)  = \lim_{n \rightarrow \infty} \frac{S(n, p)}{p} = \frac{1}{\frac{1}{r} + \frac{L}{wkr} + \frac{1}{Brw}}
 \end{equation}
 
-Once again, we manage to improve the efficiency of the algorithm by limiting the number of messages send.
-However, the efficiency if always less than 1.
+We see that we improve the efficiency of the algorithm by limiting the use of the network and reducing the global cost of the latency.
 
 # Optimal block sizes
 
-## 
+## Assumptions
 
 Equation \ref{eq:up_r}, we found a relation linking the parameters of our problem: $r$ and $k$.
 
@@ -609,70 +727,86 @@ The question now is to get the best couple $(r, k)$.
 From \ref{sec:r}, we have:
 
 \begin{equation*}
-T = \frac{HW}{rk}\left(L + \frac{k}{B} + wk\right) + \frac{(H - r)(r - 1)}{2}w
+T = \frac{HW}{prk}\left(L + \frac{k}{B} + wk\right) + \frac{(H - r)(r - 1)}{2}wk
 \end{equation*}
+
+Let us focus on the "busy waiting" time and try to minimize it.
+
+$$
+\min \frac{(H - r)(r - 1)}{2}k
+$$
 
 We can plug the expression of $k$ found in equation \ref{eq:up_r} and derive with respect to $r$:
 
-\begin{equation}
-\frac{dT}{dr} = \frac{-1}{r^2}\left(HL\left(p + \frac{1}{2}\right) + HW\left(\frac{1}{B} + w\right)\right) + \frac{w(H + 1)}{2} - wr
-\end{equation}
-
-
-As we do not know the parameters of the network, let us approximate some parts of the equation:
-
-\begin{itemize}
-    \item $p + \frac{1}{2} \simeq p$ ($p$ is large: highly distributed)
-    \item $H + 1 \simeq H$ (The image is "big")
-    \item $\frac{1}{B} + w \simeq w$ (The network is not the bottleneck of the algorithm)
-\end{itemize}
-
-At this point we have:
+$$
+\min \frac{(H - r)(r - 1)W}{2\left(r\left(p - \frac{1}{2}\right) + p + \frac{1}{2}\right)}
+$$
 
 \begin{equation}
-\frac{dT}{dr} = \frac{-1}{r^2}\left(HLp + HWw\right) + \frac{wH}{2} - wr
+\frac{dT_{w}}{dr} = \frac{(H+1-2r)(r(p-\frac{1}{2}) + p + \frac{1}{2}) - (H-r)(r-1)(p+\frac{1}{2})}{(r(p-\frac{1}{2})+p+\frac{1}{2})^2}
 \end{equation}
 
-We can also assume that $Lp + Ww \simeq Ww$ (The network is not the bottleneck of the algorithm).
+We are looing at when the upper part equals 0.
 
-We would like to solve $\frac{dT}{dr} = 0$ to find the value of $r$ minimizing $T$, and then compute the optimal value of $k$.
-
-The equation to solve is thus:
+After some manipulations, we get:
 
 \begin{equation}
-r^3 - r^2\frac{H}{2} + HW = 0
+r^2(2 - P) + r((H+3)P - (H + 1)) - (2H+1)P = 0
 \end{equation}
 
+with $P = \frac{p + \frac{1}{2}}{p - \frac{1}{2}}$
 
-Hopefully, we can solve this:
+We can assume that $P=1$, which is reasonable for values of $p > 10$.
+
+We thus get the following equation:
+
+\begin{equation}
+r^2 + 2r - (2H+1) = 0
+\end{equation}
+
+The positive solution is:
+
+\begin{equation}
+r_{+} = -1+\sqrt{2(H+1)}
+\end{equation}
+
+For large values of $H$ we have $r \simeq \sqrt{2H}$
+
+## Example
+
+```{r, echo=FALSE}
+H <- 2^13
+W <- 2^13
+p <- 16
+```
+
+Let us take an example with a square image of size $`r H`\times `r W`$ with `r p` processes.
 
 ```{r}
-H <- 2^24
-W <- 2^24
-p <- 32
+H <- 2^13
+W <- 2^13
+p <- 16
 
-roots <- polyroot(z = c(H*W, 0, -H/2, 1))
-
-r <- roots[1] # The real root
+r <- sqrt(2 * H)
 r
 k <- W / (r * (p - 0.5) + (p + 0.5))
 k
 ```
 
-We have to take the $r$ the closest to this optimal value such that $W \equiv 0~ (mod~ r\times p)$.
-In this case $r = 32$.
+We have to take the $r$ the closest to this optimal value such that $H \equiv 0~ (mod~ r\times p)$.
 
-```{r}
-W <- 512
-p <- 4
+In this case:
 
-r <- 32
+```{r, warning=FALSE}
+r <- 2^(as.integer(log2(r)))
+r
 k <- W / (r * (p - 0.5) + (p + 0.5))
 k
 ```
+We also need $k$ to be a valid number (integer that divides $W$).
 
 
-So, in this example, we would take $r = 32$ and $k = 4$
+So, in this example, we would take $r = `r r`$ and $k = `r 2^(as.integer(log2(k)))`$
 
 ## Experiment
 
@@ -683,7 +817,7 @@ We generated points for some possible values of $r$ and computed the optimal val
 We added to the dataset the optimal configuration.
 We then mesured the speedup for each configuration and plotted the results in figure \ref{fig:opti}.
 
-```{r, echo=FALSE, fig.cap="\\label{fig:opti}Speedup depending on the block size ($r$)"}
+```{r, echo=FALSE, warning=FALSE, fig.cap="\\label{fig:opti}Speedup depending on the block size ($r$)"}
 df <- read.csv("../experiments/data/output_r_opti.csv", header = TRUE, sep = " ")
 
 df$speedup <- df$seq_time / df$par_time
@@ -717,6 +851,14 @@ This could be due to how we approximated the derivative of $T$.
 However, after $r = 64$, there seems to be a "plateau" where the speedup does not variate much.
 Thus by keeping the therorical optimal $r$, we could still get some high performances.
 
+## Summary
+
+Given an image of size $H\times W$, and $p$ processors, we recommend taking:
+
+* $\displaystyle r \simeq \sqrt{2H}$
+
+* $\displaystyle k \simeq \frac{W}{\sqrt{2H}\left(p - \frac{1}{2}\right) + p + \frac{1}{2}}$
+
 # Performances
 
 TODO:
@@ -727,3 +869,65 @@ TODO:
 
 # Conclusion
 
+## To go further
+
+### Powers of 2
+
+In this paper, we decided to limit the implementation to a "simpler" use.
+Indeed, our implementation requires $H \equiv 0 \pmod k$ and $H \equiv 0~ (mod~ r\times p)$.
+Those constraints are pretty limiting.
+This is why all the experiments are based on powers of 2.
+
+By only using image with a size that is a power of 2, we limit ourselves to a very small region of the space.
+We hope however that measuring on those points gave us enough information on the global space.
+
+With more time, implementing a generic program to take any $k$ and any $r$ would allow us to be more precise in our experiments and analysis.
+
+### Another Dithering Algorithm
+
+There are several dithering algorithms.
+We could also compare the impact of the error-diffusion on the performances.
+
+For instance, the __Jarvis, Judice, and Ninke Dithering__ has the error diffusion pattern depicted in figure \ref{fig:jarvis}.
+
+
+\begin{figure}
+\label{fig:jarvis}
+\center
+\begin{tikzpicture}
+    \draw (0,0) grid (5,3);
+    % \draw [->] (2.5,2.5) -- (2.25,1.5);
+    % \draw [->] (2.5,2.5) -- (2.25,0.75);
+    % \draw [->] (2.5,2.5) -- (1.5,0.75);
+    % \draw [->] (2.5,2.5) -- (0.75,0.75);
+    \draw (2.5, 2.5) node {$X$};
+    \draw (3.5, 2.5) node {$\frac{7}{48}$};
+    \draw (4.5, 2.5) node {$\frac{5}{48}$};
+    \draw (4.5, 1.5) node {$\frac{3}{48}$};
+    \draw (3.5, 1.5) node {$\frac{5}{48}$};
+    \draw (2.5, 1.5) node {$\frac{7}{48}$};
+    \draw (1.5, 1.5) node {$\frac{5}{48}$};
+    \draw (0.5, 1.5) node {$\frac{3}{48}$};
+    \draw (0.5, 0.5) node {$\frac{1}{48}$};
+    \draw (1.5, 0.5) node {$\frac{3}{48}$};
+    \draw (2.5, 0.5) node {$\frac{5}{48}$};
+    \draw (3.5, 0.5) node {$\frac{3}{48}$};
+    \draw (4.5, 0.5) node {$\frac{1}{48}$};
+\end{tikzpicture}
+\caption{Error Diffusion for the Jarvis, Judice, and Ninke Dithering}
+\end{figure}
+
+
+### GPU and Shared Memory
+
+It would also be interesting to develop versions of a parallel Floyd-Steinberg Dithering on a GPU with CUDA and on shared memory (with Rust and Rayon or with OpenMP) and look at the difference in performances.
+
+## Performances
+
+Concerning performances, we manage to reduce the execution time by:
+
+* Working on blocks of pixels instead of single pixels $\rightarrow$ reduced the impact of the latency of the network
+
+* Giving several consecutive lines to each process $\rightarrow$ reduced the impact of the network (latency + bandwith)
+
+* Computing optimal values of $k$ and $r$ $\rightarrow$ those values are computed to reduce waiting time
