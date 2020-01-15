@@ -1,6 +1,7 @@
 #! /bin/bash
 
 IMAGE=Images/mandrill.pgm
+FACTOR=1
 
 while [[ $# -gt 0 ]]
 do
