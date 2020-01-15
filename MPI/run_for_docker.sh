@@ -2,6 +2,7 @@
 
 IMAGE=Images/mandrill.pgm
 FACTOR=1
+WITH_HOSTFILE=0
 
 while [[ $# -gt 0 ]]
 do
@@ -28,6 +29,12 @@ do
                 shift
                 shift
                 ;;
+	    --hostfile)
+		WITH_HOSTFILE=1
+		HOSTFILE_PATH=$2
+		shift
+		shift
+		;;
             --image)
                 IMAGE=$2
                 shift
@@ -40,7 +47,12 @@ do
         esac
     done
 
-mpirun --allow-run-as-root -np ${PROCESSES} ./dithering_bw ${IMAGE} ${K} ${R} ${FACTOR}
+if [[ $WITH_HOSTFILE -ne 1 ]]
+then
+	mpirun --allow-run-as-root -np ${PROCESSES} ./dithering_bw ${IMAGE} ${K} ${R} ${FACTOR}
+else
+	mpirun --allow-run-as-root -np ${PROCESSES} --hostfile ${HOSTFILE_PATH} ./dithering_bw ${IMAGE} ${K} ${R} ${FACTOR}
+fi
 
 
 
