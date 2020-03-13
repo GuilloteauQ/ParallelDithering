@@ -531,7 +531,7 @@ k_{hi} = \frac{W}{2p} = \frac{8192}{2 \times 16} = 256
 \end{equation}
 
 ```{r, echo=FALSE, fig.cap="\\label{fig:opti_k}Speedup depending on the block size ($k$)"}
-df <- read.csv("../experiments/data/output_upper_bound_k.csv", header = TRUE, sep = " ")
+df <- read.csv("experiments/data/output_upper_bound_k.csv", header = TRUE, sep = " ")
 
 df$speedup <- df$seq_time / df$par_time
 
@@ -724,8 +724,8 @@ We took a range of values for $r$ and took the $k$ value associated with this $r
 We plot the speedup for each configuration.
 
 ```{r, echo=FALSE, fig.cap="\\label{fig:opti_r}Speedup depending on the block size ($r$)"}
-df <- read.csv("../experiments/data/output_upper_bound_r_new.csv", header = TRUE, sep = " ")
-df_k <- read.csv("../experiments/data/output_upper_bound_r.csv", header = TRUE, sep = " ")
+df <- read.csv("experiments/data/output_upper_bound_r_new.csv", header = TRUE, sep = " ")
+df_k <- read.csv("experiments/data/output_upper_bound_r.csv", header = TRUE, sep = " ")
 
 df$speedup <- df$seq_time / df$par_time
 df_k$speedup <- df_k$seq_time / df_k$par_time
@@ -873,7 +873,7 @@ We added to the dataset the optimal configuration.
 We then mesured the speedup for each configuration and plotted the results in figure \ref{fig:opti}.
 
 ```{r, echo=FALSE, warning=FALSE, fig.cap="\\label{fig:opti}Speedup depending on the block size ($r$)"}
-df <- read.csv("../experiments/data/output_r_opti.csv", header = TRUE, sep = " ")
+df <- read.csv("experiments/data/output_r_opti.csv", header = TRUE, sep = " ")
 
 df$speedup <- df$seq_time / df$par_time
 
@@ -921,7 +921,7 @@ In this experiment, we fix the image size and increase the number of processes.
 The values of $r$ and $k$ are computed with respect to the rules given in \ref{sec:rules}.
 
 ```{r, echo=FALSE, warning=FALSE, fig.cap="\\label{fig:perf}Speedup depending on te number of processors"}
-df <- read.csv("../experiments/data/output_final.csv", header = TRUE, sep = " ")
+df <- read.csv("experiments/data/output_final.csv", header = TRUE, sep = " ")
 
 df$speedup <- df$seq_time / df$par_time
 
