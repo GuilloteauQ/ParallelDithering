@@ -3,7 +3,7 @@ PROG = make_bin_folder parallel_dithering
 all : $(PROG)
 
 CC        =  gcc
-CFLAGS    =  -g -Wall -O2
+CFLAGS    =  -g -Wall -O2 -fopenmp
 CPPFLAGS  =  -DDEBUG
 LDFLAGS   =  -g -O2 -fopenmp
 SRC_FOLDER = src
