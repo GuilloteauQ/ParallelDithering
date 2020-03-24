@@ -253,7 +253,6 @@ void dither_pixel(int16_t* data,
         pthread_mutex_unlock(&(locks[index_error]));
         // <<< UNLOCK
     }
-#pragma omp taskwait
 }
 
 void parallel_floyd_steinberg_tasks(int16_t* data, size_t rows, size_t cols) {
@@ -262,7 +261,6 @@ void parallel_floyd_steinberg_tasks(int16_t* data, size_t rows, size_t cols) {
     pthread_mutex_t* locks = malloc(sizeof(pthread_mutex_t) * n);
     init_tabs(remaining, locks, rows, cols);
 
-#pragma omp task
     dither_pixel(data, rows, cols, remaining, locks, 0, 0);
 
     // printf("Waiting for the barrier\n");
@@ -286,15 +284,11 @@ void parallel_floyd_steinberg_tasks(int16_t* data, size_t rows, size_t cols) {
     //     // <<< UNLOCK
     // }
 
-#pragma omp taskwait
-    printf("Through the barrier\n");
-
-    for (size_t i = 0; i < n; i++) {
-        pthread_mutex_destroy(&(locks[i]));
-    }
-    free(locks);
-    free(remaining);
-    printf("Bye bye\n");
+    // for (size_t i = 0; i < n; i++) {
+    //     pthread_mutex_destroy(&(locks[i]));
+    // }
+    // free(locks);
+    // free(remaining);
 }
 
 void parallel_floyd_steinberg(int16_t* data, size_t rows, size_t cols) {
