@@ -21,6 +21,8 @@
 
 #define RANGE 256
 
+#define BLOCK_SIZE 64
+
 #define THRESHOLD 127
 
 typedef struct image_t {
@@ -182,6 +184,135 @@ void init_tabs(uint8_t* remaining,
     }
 }
 
+void dither_block(int16_t* data,
+                  size_t rows,
+                  size_t cols,
+                  uint8_t* remaining,
+                  pthread_mutex_t* locks,
+                  size_t x,
+                  size_t y) {
+    size_t X = x * BLOCK_SIZE;
+    size_t reduced_cols = cols / BLOCK_SIZE;
+    size_t index = y * cols + X;
+    size_t max = ((x + 1) * BLOCK_SIZE < cols) ? BLOCK_SIZE
+                                               : cols - (x + 0) * BLOCK_SIZE;
+    pthread_mutex_t lock;
+    for (size_t i = 0; i < max; i++) {
+        int16_t error = update_and_compute_error(data, index + i);
+        // Right: no need to lock because is in block
+        if (X + i < cols - 1) {
+            if (i == max - 1) {
+                lock = locks[(y + 0) * reduced_cols + (x + 1)];
+                // >>> LOCK
+                pthread_mutex_lock(&lock);
+                data[(y + 0) * cols + (X + i + 1)] += error * RIGHT;
+                pthread_mutex_unlock(&lock);
+                // <<< UNLOCK
+            } else {
+                data[(y + 0) * cols + (X + i + 1)] += error * RIGHT;
+            }
+        }
+        if (y < rows - 1) {
+            // Bot Left
+            if (X + i > 0) {
+                lock = (i == 0) ? locks[(y + 1) * reduced_cols + (x - 1)]
+                                : locks[(y + 1) * reduced_cols + (x + 0)];
+                // >>> LOCK
+                pthread_mutex_lock(&lock);
+                data[(y + 1) * cols + (X + i - 1)] += error * BOT_LEFT;
+                pthread_mutex_unlock(&lock);
+                // <<< UNLOCK
+            }
+            lock = locks[(y + 1) * reduced_cols + (x + 0)];
+            // >>> LOCK
+            pthread_mutex_lock(&lock);
+            data[(y + 1) * cols + (X + i)] += error * BOT;
+            pthread_mutex_unlock(&lock);
+            // <<< UNLOCK
+            if (X + i < cols - 1) {
+                lock = (i == max - 1) ? locks[(y + 1) * reduced_cols + (x + 1)]
+                                      : locks[(y + 1) * reduced_cols + (x + 0)];
+                // >>> LOCK
+                pthread_mutex_lock(&lock);
+                data[(y + 1) * cols + (X + i + 1)] += error * BOT_RIGHT;
+                pthread_mutex_unlock(&lock);
+                // <<< UNLOCK
+            }
+        }
+    }
+    // Now updating the "remaining"
+    if (x < reduced_cols - 1) {
+        // We can update to our right
+        index = (y + 0) * reduced_cols + (x + 1);
+        lock = locks[index];
+        // >>> LOCK
+        pthread_mutex_lock(&lock);
+        remaining[index] += CODE_RIGHT;
+        if (remaining[index] >= 15) {
+#pragma omp task
+            dither_block(data, rows, cols, remaining, locks, x + 1, y + 0);
+        }
+        pthread_mutex_unlock(&lock);
+        // <<< UNLOCK
+    }
+    if (y < rows - 1) {
+        index = (y + 1) * reduced_cols + (x + 0);
+        lock = locks[index];
+        // >>> LOCK
+        pthread_mutex_lock(&lock);
+        remaining[index] += CODE_BOT;
+        if (remaining[index] >= 15) {
+#pragma omp task
+            dither_block(data, rows, cols, remaining, locks, x + 0, y + 1);
+        }
+        pthread_mutex_unlock(&lock);
+        // <<< UNLOCK
+        if (x > 0) {
+            index = (y + 1) * reduced_cols + (x - 1);
+            lock = locks[index];
+            // >>> LOCK
+            pthread_mutex_lock(&lock);
+            remaining[index] += CODE_BOT_LEFT;
+            if (remaining[index] >= 15) {
+#pragma omp task
+                dither_block(data, rows, cols, remaining, locks, x - 1, y + 1);
+            }
+            pthread_mutex_unlock(&lock);
+            // <<< UNLOCK
+        }
+        if (x < reduced_cols - 1) {
+            index = (y + 1) * reduced_cols + (x + 1);
+            lock = locks[index];
+            // >>> LOCK
+            pthread_mutex_lock(&lock);
+            remaining[index] += CODE_BOT_RIGHT;
+            if (remaining[index] >= 15) {
+#pragma omp task
+                dither_block(data, rows, cols, remaining, locks, x + 1, y + 1);
+            }
+            pthread_mutex_unlock(&lock);
+            // <<< UNLOCK
+        }
+    }
+#pragma omp taskwait
+}
+
+void parallel_floyd_steinberg_tasks_by_block(int16_t* data,
+                                             size_t rows,
+                                             size_t cols) {
+    size_t n = rows * cols / BLOCK_SIZE;
+    uint8_t* remaining = calloc(sizeof(uint8_t), n);
+    pthread_mutex_t* locks = malloc(sizeof(pthread_mutex_t) * n);
+    init_tabs(remaining, locks, rows, cols / BLOCK_SIZE);
+
+    dither_block(data, rows, cols, remaining, locks, 0, 0);
+
+    // for (size_t i = 0; i < n; i++) {
+    //     pthread_mutex_destroy(&(locks[i]));
+    // }
+    // free(locks);
+    // free(remaining);
+}
 void dither_pixel(int16_t* data,
                   size_t rows,
                   size_t cols,
@@ -262,27 +393,6 @@ void parallel_floyd_steinberg_tasks(int16_t* data, size_t rows, size_t cols) {
     init_tabs(remaining, locks, rows, cols);
 
     dither_pixel(data, rows, cols, remaining, locks, 0, 0);
-
-    // printf("Waiting for the barrier\n");
-    // // #pragma omp barrier
-
-    // pthread_mutex_t last_lock = locks[n - 1];
-    // uint8_t last_remaining;
-
-    // // >>> LOCK
-    // pthread_mutex_lock(&last_lock);
-    // last_remaining = remaining[n - 1];
-    // pthread_mutex_unlock(&last_lock);
-    // // <<< UNLOCK
-
-    // while (last_remaining != 15) {
-    //     usleep(100);
-    //     // >>> LOCK
-    //     pthread_mutex_lock(&last_lock);
-    //     last_remaining = remaining[n - 1];
-    //     pthread_mutex_unlock(&last_lock);
-    //     // <<< UNLOCK
-    // }
 
     // for (size_t i = 0; i < n; i++) {
     //     pthread_mutex_destroy(&(locks[i]));
@@ -403,7 +513,7 @@ double floyd_steinberg_par(Image* image) {
 #pragma omp single
         {
             start = omp_get_wtime();
-            parallel_floyd_steinberg_tasks(image->pixels, rows, cols);
+            parallel_floyd_steinberg_tasks_by_block(image->pixels, rows, cols);
             end = omp_get_wtime();
         }
     }
